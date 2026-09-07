@@ -76,8 +76,8 @@ with open(sys.argv[1], encoding="utf-8") as handle:
 
 model_index = argv.index("--model")
 actual_model = argv[model_index + 1]
-if actual_model != "gpt-6-astra":
-    raise SystemExit(f"expected default GPT model gpt-6-astra, got {actual_model!r}")
+if actual_model != "gpt-5.6-sol":
+    raise SystemExit(f"expected default GPT model gpt-5.6-sol, got {actual_model!r}")
 
 if "model_reasoning_effort=xhigh" not in argv:
     raise SystemExit(f"manual GPT review did not use xhigh reasoning: {argv!r}")
@@ -111,7 +111,7 @@ assert_unsupported_version() {
     FRESHEYES_FAKE_VERSION_PROBE="$VERSION_PROBE_FILE" \
     FRESHEYES_LOG_DIR="$TEST_TMP/unsupported-$slug-logs" \
     FRESHEYES_GLOBAL_LOG_DIR="$TEST_TMP/unsupported-$slug-global-logs" \
-    FRESHEYES_GPT_MODEL= \
+    FRESHEYES_GPT_MODEL=gpt-6-astra \
     FRESHEYES_MODEL= \
     FRESHEYES_MODE=manual \
     timeout 30s bash "$RUNNER" --foreground --gpt --manual "Review README.md." > "$stdout_file" 2> "$stderr_file"
@@ -131,7 +131,7 @@ assert_unsupported_version() {
 
 assert_unsupported_version "0.152.9"
 assert_unsupported_version "0.153.1-alpha.1"
-# Between the two gates: fine for a GPT-5.6 override, too old for the GPT-6 default.
+# Between the two gates: fine for a GPT-5.6 override, too old for the explicit GPT-6 override.
 assert_unsupported_version "0.145.0"
 
 # Exact-boundary acceptance: the new minimum itself must pass (pins
@@ -143,7 +143,7 @@ PATH="$FAKE_BIN:$PATH" \
   FRESHEYES_FAKE_VERSION_PROBE="$VERSION_PROBE_FILE" \
   FRESHEYES_LOG_DIR="$TEST_TMP/boundary-logs" \
   FRESHEYES_GLOBAL_LOG_DIR="$TEST_TMP/boundary-global-logs" \
-  FRESHEYES_GPT_MODEL= \
+  FRESHEYES_GPT_MODEL=gpt-6-astra \
   FRESHEYES_MODEL= \
   FRESHEYES_MODE=manual \
   timeout 30s bash "$RUNNER" --foreground --gpt --manual "Review README.md." > /dev/null
@@ -156,7 +156,7 @@ with open(sys.argv[1], encoding="utf-8") as handle:
     argv = json.load(handle)
 model_index = argv.index("--model")
 if argv[model_index + 1] != "gpt-6-astra":
-    raise SystemExit(f"boundary-version run did not use the default model: {argv!r}")
+    raise SystemExit(f"boundary-version run did not use the explicit Astra override: {argv!r}")
 PY
 
 TERRA_ARGV_FILE="$TEST_TMP/codex-terra-argv.json"
@@ -257,8 +257,8 @@ with open(sys.argv[1], encoding="utf-8") as handle:
 
 model_index = argv.index("--model")
 actual_model = argv[model_index + 1]
-if actual_model != "gpt-6-astra":
-    raise SystemExit(f"expected automatic GPT model gpt-6-astra, got {actual_model!r}")
+if actual_model != "gpt-5.6-sol":
+    raise SystemExit(f"expected automatic GPT model gpt-5.6-sol, got {actual_model!r}")
 if "model_reasoning_effort=medium" not in argv:
     raise SystemExit(f"automatic GPT review did not use medium reasoning: {argv!r}")
 if "--output-schema" not in argv or "-o" not in argv:
