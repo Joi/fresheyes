@@ -29,6 +29,11 @@ if sys.argv[1:] == ["--version"]:
     print(f"codex-cli {os.environ.get('FRESHEYES_FAKE_VERSION', '0.153.4')}")
     raise SystemExit(0)
 
+# Like the real codex exec: when stdin is not a TTY, read it to EOF before
+# doing anything. A launcher that leaves an open, silent stdin hangs here.
+if not sys.stdin.isatty():
+    sys.stdin.read()
+
 with open(os.environ["FRESHEYES_FAKE_ARGV"], "w", encoding="utf-8") as handle:
     json.dump(sys.argv[1:], handle)
 
@@ -472,5 +477,30 @@ if "--ignore-user-config" not in automatic:
 if "model_reasoning_effort=medium" not in automatic:
     raise SystemExit(f"automatic GPT launch no longer runs at medium with FRESHEYES_REASONING set: {automatic!r}")
 PY
+
+# The launcher's own stdin may be an open pipe nobody closes (a background job,
+# a supervisor). Codex must not inherit it, or the review blocks before its
+# first call.
+STDIN_ARGV_FILE="$TEST_TMP/codex-stdin-argv.json"
+STDIN_STDOUT_FILE="$TEST_TMP/stdin-stdout.txt"
+sleep 60 | PATH="$FAKE_BIN:$PATH" \
+  FRESHEYES_FAKE_ARGV="$STDIN_ARGV_FILE" \
+  FRESHEYES_FAKE_VERSION_PROBE="$VERSION_PROBE_FILE" \
+  FRESHEYES_LOG_DIR="$TEST_TMP/stdin-logs" \
+  FRESHEYES_GLOBAL_LOG_DIR="$TEST_TMP/stdin-global-logs" \
+  FRESHEYES_GPT_MODEL= \
+  FRESHEYES_MODEL= \
+  FRESHEYES_REASONING= \
+  FRESHEYES_CODEX_IGNORE_USER_CONFIG= \
+  FRESHEYES_MODE=manual \
+  timeout 20s bash "$RUNNER" --foreground --gpt --manual "Review README.md." > "$STDIN_STDOUT_FILE" || {
+    printf 'a silent open stdin on the launcher stalled the Codex review (timeout hit)\n' >&2
+    exit 1
+  }
+if ! grep -q '^INDEPENDENT CODE REVIEW PASSED$' "$STDIN_STDOUT_FILE"; then
+  printf 'review with an open launcher stdin did not complete:\n' >&2
+  cat "$STDIN_STDOUT_FILE" >&2
+  exit 1
+fi
 
 printf 'fresheyes-gpt-provider tests passed\n'
