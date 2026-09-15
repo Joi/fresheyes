@@ -575,6 +575,10 @@ CLAUDE_STREAM_PARSER="$SCRIPT_DIR/fresheyes-claude-stream.py"
 # the caller's config.toml reach the review, and the prompt carries less
 # preamble on every call. Off by default because config.toml is also where a
 # custom model provider or trust settings live.
+# Codex also reads extra prompt text from stdin whenever stdin is not a TTY, and
+# blocks until EOF. The prompt is an argument here, so both launches get
+# </dev/null: a caller with an open, silent stdin (a background job, a
+# supervisor's pipe) would otherwise hang the review before its first call.
 CODEX_USER_CONFIG_FLAG=""
 if [[ "${FRESHEYES_CODEX_IGNORE_USER_CONFIG:-0}" == "1" ]]; then
   CODEX_USER_CONFIG_FLAG="--ignore-user-config"
@@ -589,7 +593,7 @@ run_gpt_manual() {
     -c features.shell_snapshot=false \
     -c model_reasoning_effort="$REASONING_EFFORT" \
     -o "$RESULT_FILE" \
-    "$PROMPT" 2>&1 | tee "$LOG_FILE" > /dev/null; then
+    "$PROMPT" </dev/null 2>&1 | tee "$LOG_FILE" > /dev/null; then
     echo "Fresh Eyes: $PROVIDER_LABEL failed. See log: $LOG_FILE" >&2
     exit 1
   fi
@@ -612,7 +616,7 @@ run_gpt_automatic() {
     --output-schema "$SCHEMA_FILE" \
     -o "$output_file" \
     -c model_reasoning_effort="$REASONING_EFFORT" \
-    "$PROMPT" 2>&1 | tee "$LOG_FILE" > /dev/null; then
+    "$PROMPT" </dev/null 2>&1 | tee "$LOG_FILE" > /dev/null; then
     echo "Fresh Eyes: $PROVIDER_LABEL failed. Commit blocked." >&2
     echo "Full log: $LOG_FILE" >&2
     exit 1
