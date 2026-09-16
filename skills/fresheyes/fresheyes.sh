@@ -585,9 +585,13 @@ if [[ "${FRESHEYES_CODEX_IGNORE_USER_CONFIG:-0}" == "1" ]]; then
 fi
 
 run_gpt_manual() {
+  # --skip-git-repo-check: codex exec aborts when its working directory is not
+  # inside a git repo. Reviews run read-only and the scope names its own repo
+  # (often via `git -C`), so the caller's CWD must not gate the review.
   if ! "$CODEX_BIN" exec \
     $CODEX_USER_CONFIG_FLAG \
     --sandbox read-only \
+    --skip-git-repo-check \
     --color never \
     --model "$MODEL" \
     -c features.shell_snapshot=false \
@@ -610,6 +614,7 @@ run_gpt_automatic() {
   if ! "$CODEX_BIN" exec \
     $CODEX_USER_CONFIG_FLAG \
     --sandbox read-only \
+    --skip-git-repo-check \
     --color never \
     --model "$MODEL" \
     -c features.shell_snapshot=false \
