@@ -30,7 +30,7 @@ npm install -g @openai/codex@latest
 npm install -g @anthropic-ai/claude-code@latest
 ```
 
-GPT-6 Astra requires Codex CLI 0.153.1 or newer. Manual GPT reviews use GPT-6 Astra with Extra High reasoning by default; automatic reviews use Astra with Medium reasoning. Astra is rolling out to Pro, Business, and Enterprise plans first; if the default errors for you on Plus, add `export FRESHEYES_GPT_MODEL=gpt-5.6-sol` to your shell profile, and on Free or Go use `export FRESHEYES_GPT_MODEL=gpt-5.6-terra`, so both manual and automatic reviews use a GPT-5.6 model your plan includes.
+GPT-6 Astra requires Codex CLI 0.153.1 or newer. Manual GPT reviews use GPT-6 Astra with Extra High reasoning by default; automatic reviews use Astra with Medium reasoning. Set `FRESHEYES_VERSION_PROBE_TIMEOUT` (seconds, 20 by default) to change how long the prerequisite `codex --version` / `claude --version` probe may take before the launch fails with a named error; raise it on a slow host, and note that a probe that never answers at all is usually the CLI being blocked outside itself rather than a slow one. Astra is rolling out to Pro, Business, and Enterprise plans first; if the default errors for you on Plus, add `export FRESHEYES_GPT_MODEL=gpt-5.6-sol` to your shell profile, and on Free or Go use `export FRESHEYES_GPT_MODEL=gpt-5.6-terra`, so both manual and automatic reviews use a GPT-5.6 model your plan includes.
 
 Claude Fable 5.1 requires Claude Code 2.1.257 or newer. Manual Claude reviews use Fable 5.1 with Extra High reasoning by default; automatic reviews use Fable 5.1 with Medium reasoning. Fable 5.1 is available to Pro, Max, Team, and Enterprise users, as well as through usage credits and API access.
 
