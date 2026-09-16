@@ -105,6 +105,61 @@ raise SystemExit(0 if supported else 1)
 PY
 }
 
+# A `--version` probe must answer or fail; it must never hang. This check runs
+# before $GLOBAL_LOG_DIR exists and before a handle is minted, so a probe that
+# blocks forever leaves the caller with no FRESHPID, no tracker and an empty
+# output file — indistinguishable from a slow launch. Seen 2026-09-16 on macOS
+# 26.6.2: a wedged Gatekeeper evaluation (syspolicyd) slept `codex --version`
+# in the kernel before dyld ran, so nothing in the exec path ever returned.
+# Written as a watchdog rather than timeout(1), which is coreutils and is not
+# present on a stock macOS.
+VERSION_PROBE_TIMEOUT="${FRESHEYES_VERSION_PROBE_TIMEOUT:-20}"
+if [[ ! "$VERSION_PROBE_TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
+  echo "Error: FRESHEYES_VERSION_PROBE_TIMEOUT must be a positive whole number of seconds (got '$VERSION_PROBE_TIMEOUT')." >&2
+  exit 1
+fi
+
+probe_version() {
+  # Runs "$@" with stdin closed, prints its combined output, and returns its
+  # exit status — or 124, like timeout(1), when it did not answer in time.
+  # The watchdog signals the probe process itself, which is all a `--version`
+  # launch is; a wrapper that execs its real binary keeps the same pid, so the
+  # one it kills is the one that is stuck. A wrapper that forks instead would
+  # leave its child behind — harmless for a probe, and the launch still fails
+  # instead of hanging.
+  local out_file timeout_marker probe_pid watchdog_pid status=0
+  if ! out_file="$(mktemp "${TMPDIR:-/tmp}/fresheyes-version.XXXXXX")"; then
+    echo "Error: could not create a temporary file for the version probe." >&2
+    return 1
+  fi
+  timeout_marker="$out_file.timeout"
+
+  "$@" </dev/null >"$out_file" 2>&1 &
+  probe_pid=$!
+  (
+    sleep "$VERSION_PROBE_TIMEOUT"
+    : > "$timeout_marker"
+    kill -TERM "$probe_pid" 2>/dev/null || true
+    sleep 2
+    kill -KILL "$probe_pid" 2>/dev/null || true
+  ) >/dev/null 2>&1 &
+  watchdog_pid=$!
+
+  wait "$probe_pid" || status=$?
+  kill -TERM "$watchdog_pid" 2>/dev/null || true
+  wait "$watchdog_pid" 2>/dev/null || true
+
+  cat "$out_file"
+  # Only a probe the watchdog actually signalled is a timeout: it must have died
+  # on a signal AND the marker must be there. A probe that exits 124 by itself,
+  # or that answered just as the marker landed, is not a timeout.
+  if [[ "$status" -ge 128 && -e "$timeout_marker" ]]; then
+    status=124
+  fi
+  rm -f "$out_file" "$timeout_marker"
+  return "$status"
+}
+
 # --- CLI prerequisite check ---
 if [[ "$PROVIDER" == "gpt" ]]; then
   if [[ "${FRESHEYES_DAEMONIZED:-0}" == "1" && -n "${FRESHEYES_CODEX_BIN:-}" ]]; then
@@ -128,7 +183,17 @@ if [[ "$PROVIDER" == "gpt" ]]; then
       gpt-5.6*) MINIMUM_CODEX_VERSION="0.144.0"; CODEX_MODEL_FAMILY="GPT-5.6" ;;
     esac
     if [[ -n "$MINIMUM_CODEX_VERSION" ]]; then
-      if ! CODEX_VERSION_OUTPUT="$(codex --version 2>&1)"; then
+      CODEX_VERSION_STATUS=0
+      CODEX_VERSION_OUTPUT="$(probe_version codex --version)" || CODEX_VERSION_STATUS=$?
+      if [[ "$CODEX_VERSION_STATUS" -eq 124 ]]; then
+        echo "Error: 'codex --version' did not answer within ${VERSION_PROBE_TIMEOUT}s." >&2
+        echo "The CLI is installed but did not respond. Raise the limit with" >&2
+        echo "FRESHEYES_VERSION_PROBE_TIMEOUT if the host is merely slow. One known cause" >&2
+        echo "on macOS is a wedged Gatekeeper evaluation, which blocks exec before the" >&2
+        echo "binary runs; 'sudo killall syspolicyd' clears that one." >&2
+        exit 1
+      fi
+      if [[ "$CODEX_VERSION_STATUS" -ne 0 ]]; then
         echo "Error: unable to determine the Codex CLI version." >&2
         echo "Update it with: npm install -g @openai/codex@latest" >&2
         exit 1
@@ -170,7 +235,17 @@ elif [[ "$PROVIDER" == "claude" ]]; then
       claude-fable-5*)   MINIMUM_CLAUDE_VERSION="2.1.170"; CLAUDE_MODEL_FAMILY="Claude Fable 5" ;;
     esac
     if [[ -n "$MINIMUM_CLAUDE_VERSION" ]]; then
-      if ! CLAUDE_VERSION_OUTPUT="$(claude --version 2>&1)"; then
+      CLAUDE_VERSION_STATUS=0
+      CLAUDE_VERSION_OUTPUT="$(probe_version claude --version)" || CLAUDE_VERSION_STATUS=$?
+      if [[ "$CLAUDE_VERSION_STATUS" -eq 124 ]]; then
+        echo "Error: 'claude --version' did not answer within ${VERSION_PROBE_TIMEOUT}s." >&2
+        echo "The CLI is installed but did not respond. Raise the limit with" >&2
+        echo "FRESHEYES_VERSION_PROBE_TIMEOUT if the host is merely slow. One known cause" >&2
+        echo "on macOS is a wedged Gatekeeper evaluation, which blocks exec before the" >&2
+        echo "binary runs; 'sudo killall syspolicyd' clears that one." >&2
+        exit 1
+      fi
+      if [[ "$CLAUDE_VERSION_STATUS" -ne 0 ]]; then
         echo "Error: unable to determine the Claude Code version." >&2
         echo "Update it with: npm install -g @anthropic-ai/claude-code@latest" >&2
         exit 1
