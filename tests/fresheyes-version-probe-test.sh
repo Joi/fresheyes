@@ -26,6 +26,8 @@ PROBE_LIMIT=3
 #                 runner this was a timeout
 #   stdin       – reads stdin to EOF first, then answers; only a launcher that
 #                 closes stdin gets an answer at all
+#   exit124     – fails immediately with status 124 of its own accord; it must
+#                 not read back as the watchdog's timeout
 #   ok          – answers immediately
 # Anything else it is asked to do just fails, which is enough: every assertion
 # here is about whether the launch got past the version gate.
@@ -44,6 +46,8 @@ if sys.argv[1:] == ["--version"]:
     if behavior in ("hang", "hang_ignore", "hang_exit"):
         while True:
             time.sleep(3600)
+    if behavior == "exit124":
+        raise SystemExit(124)
     if behavior == "stdin":
         sys.stdin.read()
     print("$version")
@@ -140,6 +144,55 @@ assert_stdin_probe_passes_the_gate() {
 
 assert_stdin_probe_passes_the_gate --gpt codex
 assert_stdin_probe_passes_the_gate --claude claude
+
+# A probe that picks 124 for its own reasons is not our timeout: the watchdog
+# never fired, so the launch must fall back to the ordinary "unable to
+# determine" path rather than blame a hang it did not observe.
+exit124_stdout="$TEST_TMP/exit124-stdout.txt"
+exit124_stderr="$TEST_TMP/exit124-stderr.txt"
+exit124_result="$(run_launch --gpt exit124 "$PROBE_LIMIT" "$exit124_stdout" "$exit124_stderr")"
+if [[ "${exit124_result% *}" -eq 0 ]]; then
+  printf 'a codex --version that exits 124 was accepted as a version\n' >&2
+  exit 1
+fi
+if grep -q 'did not answer within' "$exit124_stderr"; then
+  printf 'a codex --version that exits 124 on its own was reported as a timeout:\n' >&2
+  cat "$exit124_stderr" >&2
+  exit 1
+fi
+if ! grep -q 'unable to determine the Codex CLI version' "$exit124_stderr"; then
+  printf 'a codex --version that exits 124 did not take the ordinary failure path:\n' >&2
+  cat "$exit124_stderr" >&2
+  exit 1
+fi
+
+# The watchdog must reap the sleep it is waiting on. Left alone it outlives
+# every fast probe by the full limit, in the caller's process group. The limit
+# here is long enough that a surviving sleep is still there to be counted.
+NAP_LIMIT=$(( PROBE_LIMIT * 20 ))
+count_naps() {
+  # pgrep exits 1 when nothing matches, which pipefail would turn into a test
+  # failure; an empty match is the answer we want, not an error.
+  local matches
+  matches="$(pgrep -f "^sleep $NAP_LIMIT\$" 2>/dev/null || true)"
+  [[ -z "$matches" ]] && { printf '0\n'; return 0; }
+  printf '%s\n' "$matches" | wc -l | tr -d ' '
+}
+sleeps_before="$(count_naps)"
+ok_stdout="$TEST_TMP/ok-stdout.txt"
+ok_stderr="$TEST_TMP/ok-stderr.txt"
+run_launch --gpt ok "$NAP_LIMIT" "$ok_stdout" "$ok_stderr" > /dev/null
+sleeps_after="$(count_naps)"
+if [[ "$sleeps_after" -gt "$sleeps_before" ]]; then
+  printf 'the watchdog left its sleep behind after a fast probe (%s -> %s)\n' \
+    "$sleeps_before" "$sleeps_after" >&2
+  exit 1
+fi
+if grep -q 'did not answer within' "$ok_stderr"; then
+  printf 'a fast probe was reported as a timeout\n' >&2
+  cat "$ok_stderr" >&2
+  exit 1
+fi
 
 # A bad limit is a configuration error, not a timeout: it must say so rather
 # than fire at t=0 and send the operator after syspolicyd.
