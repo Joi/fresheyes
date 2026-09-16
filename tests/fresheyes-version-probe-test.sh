@@ -26,6 +26,8 @@ PROBE_LIMIT=3
 #                 runner this was a timeout
 #   stdin       – reads stdin to EOF first, then answers; only a launcher that
 #                 closes stdin gets an answer at all
+#   hang_zero   – never returns, then HANDLES SIGTERM and exits 0 in silence; it
+#                 answered nothing, so only the marker can call it a timeout
 #   exit124     – fails immediately with status 124 of its own accord; it must
 #                 not read back as the watchdog's timeout
 #   ok          – answers immediately
@@ -43,7 +45,9 @@ if sys.argv[1:] == ["--version"]:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
     if behavior == "hang_exit":
         signal.signal(signal.SIGTERM, lambda *_: sys.exit(3))
-    if behavior in ("hang", "hang_ignore", "hang_exit"):
+    if behavior == "hang_zero":
+        signal.signal(signal.SIGTERM, lambda *_: os._exit(0))
+    if behavior in ("hang", "hang_ignore", "hang_exit", "hang_zero"):
         while True:
             time.sleep(3600)
     if behavior == "exit124":
@@ -117,8 +121,10 @@ assert_hang_is_named() {
 assert_hang_is_named --gpt codex hang
 assert_hang_is_named --gpt codex hang_ignore
 assert_hang_is_named --gpt codex hang_exit
+assert_hang_is_named --gpt codex hang_zero
 assert_hang_is_named --claude claude hang
 assert_hang_is_named --claude claude hang_exit
+assert_hang_is_named --claude claude hang_zero
 
 # A probe that reads stdin must still answer: the launcher closes it. Getting
 # past the gate is the assertion — "review starting" is printed only after the

@@ -128,7 +128,9 @@ probe_version() {
   # instead of hanging. The one case this cannot bound is a probe wedged in an
   # uninterruptible kernel wait, where even SIGKILL does not land; the macOS
   # Gatekeeper sleep that prompted this is interruptible, and timeout(1)
-  # returned 124 against it.
+  # returned 124 against it. One more limit: if the caller started fresheyes
+  # with SIGTERM ignored, bash cannot trap it, so the watchdog outlives its
+  # cancellation and every fast probe costs the full limit — slow, never stuck.
   # Both temp files live in a private directory: the marker decides the verdict,
   # so a predictable name in shared /tmp would let anyone forge one.
   local probe_dir out_file timeout_marker probe_pid watchdog_pid status=0
@@ -149,7 +151,11 @@ probe_version() {
     trap 'kill -TERM "$nap_pid" 2>/dev/null; exit 0' TERM
     sleep "$VERSION_PROBE_TIMEOUT" & nap_pid=$!
     wait "$nap_pid" 2>/dev/null || exit 0
-    : > "$timeout_marker"
+    # Never let a failed marker write (a full or over-quota $TMPDIR) exit this
+    # subshell before the kill: the whole point is that the probe gets bounded.
+    # Without the marker the parent reports "unable to determine the version"
+    # rather than the hang, which is a worse message but not a hang.
+    : > "$timeout_marker" || true
     kill -TERM "$probe_pid" 2>/dev/null || true
     sleep 2 & nap_pid=$!
     wait "$nap_pid" 2>/dev/null || exit 0
@@ -162,12 +168,14 @@ probe_version() {
   wait "$watchdog_pid" 2>/dev/null || true
 
   cat "$out_file"
-  # The marker decides. If it is there the probe outlived the limit, whether it
-  # died on the signal or handled it and exited on its own — both are the hang
-  # this exists to name. A probe that answered before the marker landed exits 0
-  # and is untouched. Without the marker, a probe that chose 124 for its own
-  # reasons must not read back as our timeout.
-  if [[ "$status" -ne 0 && -e "$timeout_marker" ]]; then
+  # The marker decides, tempered by one thing the probe can still prove: an
+  # answer. If the marker is there and the probe either failed or printed
+  # nothing, it outlived the limit — whether it died on the signal, or handled
+  # it and exited 0 without saying anything. A probe that answered just as the
+  # marker landed did answer, and its output is worth more than the clock.
+  # Without a marker, a probe that chose 124 for its own reasons must not read
+  # back as our timeout.
+  if [[ -e "$timeout_marker" && ( "$status" -ne 0 || ! -s "$out_file" ) ]]; then
     status=124
   elif [[ "$status" -eq 124 ]]; then
     status=1
