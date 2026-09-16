@@ -126,13 +126,19 @@ probe_version() {
   # launch is; a wrapper that execs its real binary keeps the same pid, so the
   # one it kills is the one that is stuck. A wrapper that forks instead would
   # leave its child behind — harmless for a probe, and the launch still fails
-  # instead of hanging.
-  local out_file timeout_marker probe_pid watchdog_pid status=0
-  if ! out_file="$(mktemp "${TMPDIR:-/tmp}/fresheyes-version.XXXXXX")"; then
-    echo "Error: could not create a temporary file for the version probe." >&2
+  # instead of hanging. The one case this cannot bound is a probe wedged in an
+  # uninterruptible kernel wait, where even SIGKILL does not land; the macOS
+  # Gatekeeper sleep that prompted this is interruptible, and timeout(1)
+  # returned 124 against it.
+  # Both temp files live in a private directory: the marker decides the verdict,
+  # so a predictable name in shared /tmp would let anyone forge one.
+  local probe_dir out_file timeout_marker probe_pid watchdog_pid status=0
+  if ! probe_dir="$(mktemp -d "${TMPDIR:-/tmp}/fresheyes-version.XXXXXX")"; then
+    echo "Error: could not create a temporary directory for the version probe." >&2
     return 1
   fi
-  timeout_marker="$out_file.timeout"
+  out_file="$probe_dir/output"
+  timeout_marker="$probe_dir/timeout"
 
   "$@" </dev/null >"$out_file" 2>&1 &
   probe_pid=$!
@@ -167,7 +173,7 @@ probe_version() {
   elif [[ "$status" -eq 124 ]]; then
     status=1
   fi
-  rm -f "$out_file" "$timeout_marker"
+  rm -rf "$probe_dir"
   return "$status"
 }
 
@@ -466,7 +472,7 @@ launch_via_systemd_run() {
   for var in FRESHEYES_LOG_DIR FRESHEYES_GLOBAL_LOG_DIR FRESHEYES_MODE \
              FRESHEYES_PROVIDER FRESHEYES_GPT_MODEL FRESHEYES_CLAUDE_MODEL \
              FRESHEYES_MODEL FRESHEYES_CODEX_BIN FRESHEYES_CLAUDE_BIN \
-             FRESHEYES_HEARTBEAT_SECS TMPDIR \
+             FRESHEYES_HEARTBEAT_SECS FRESHEYES_VERSION_PROBE_TIMEOUT TMPDIR \
              HTTP_PROXY HTTPS_PROXY NO_PROXY http_proxy https_proxy no_proxy \
              ALL_PROXY SSL_CERT_FILE SSL_CERT_DIR REQUESTS_CA_BUNDLE \
              NODE_EXTRA_CA_CERTS CURL_CA_BUNDLE \
