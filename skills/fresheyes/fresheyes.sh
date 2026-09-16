@@ -136,11 +136,18 @@ probe_version() {
 
   "$@" </dev/null >"$out_file" 2>&1 &
   probe_pid=$!
+  # The watchdog waits on a `sleep` it can hand back: killing a subshell does not
+  # kill the `sleep` it is blocked in, and a stray `sleep` per launch would
+  # outlive every fast probe.
   (
-    sleep "$VERSION_PROBE_TIMEOUT"
+    nap_pid=""
+    trap 'kill -TERM "$nap_pid" 2>/dev/null; exit 0' TERM
+    sleep "$VERSION_PROBE_TIMEOUT" & nap_pid=$!
+    wait "$nap_pid" 2>/dev/null || exit 0
     : > "$timeout_marker"
     kill -TERM "$probe_pid" 2>/dev/null || true
-    sleep 2
+    sleep 2 & nap_pid=$!
+    wait "$nap_pid" 2>/dev/null || exit 0
     kill -KILL "$probe_pid" 2>/dev/null || true
   ) >/dev/null 2>&1 &
   watchdog_pid=$!
@@ -150,11 +157,15 @@ probe_version() {
   wait "$watchdog_pid" 2>/dev/null || true
 
   cat "$out_file"
-  # Only a probe the watchdog actually signalled is a timeout: it must have died
-  # on a signal AND the marker must be there. A probe that exits 124 by itself,
-  # or that answered just as the marker landed, is not a timeout.
-  if [[ "$status" -ge 128 && -e "$timeout_marker" ]]; then
+  # The marker decides. If it is there the probe outlived the limit, whether it
+  # died on the signal or handled it and exited on its own — both are the hang
+  # this exists to name. A probe that answered before the marker landed exits 0
+  # and is untouched. Without the marker, a probe that chose 124 for its own
+  # reasons must not read back as our timeout.
+  if [[ "$status" -ne 0 && -e "$timeout_marker" ]]; then
     status=124
+  elif [[ "$status" -eq 124 ]]; then
+    status=1
   fi
   rm -f "$out_file" "$timeout_marker"
   return "$status"

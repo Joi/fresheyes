@@ -21,6 +21,9 @@ PROBE_LIMIT=3
 # The fake CLI answers --version according to FRESHEYES_FAKE_VERSION_BEHAVIOR:
 #   hang        – never returns (the failure this test exists for)
 #   hang_ignore – never returns AND ignores SIGTERM, so the KILL escalation runs
+#   hang_exit   – never returns, then HANDLES SIGTERM and exits non-zero on its
+#                 own; it never dies by signal, so only the marker can tell the
+#                 runner this was a timeout
 #   stdin       – reads stdin to EOF first, then answers; only a launcher that
 #                 closes stdin gets an answer at all
 #   ok          – answers immediately
@@ -36,7 +39,9 @@ if sys.argv[1:] == ["--version"]:
     behavior = os.environ.get("FRESHEYES_FAKE_VERSION_BEHAVIOR", "ok")
     if behavior == "hang_ignore":
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
-    if behavior in ("hang", "hang_ignore"):
+    if behavior == "hang_exit":
+        signal.signal(signal.SIGTERM, lambda *_: sys.exit(3))
+    if behavior in ("hang", "hang_ignore", "hang_exit"):
         while True:
             time.sleep(3600)
     if behavior == "stdin":
@@ -107,7 +112,9 @@ assert_hang_is_named() {
 
 assert_hang_is_named --gpt codex hang
 assert_hang_is_named --gpt codex hang_ignore
+assert_hang_is_named --gpt codex hang_exit
 assert_hang_is_named --claude claude hang
+assert_hang_is_named --claude claude hang_exit
 
 # A probe that reads stdin must still answer: the launcher closes it. Getting
 # past the gate is the assertion — "review starting" is printed only after the
