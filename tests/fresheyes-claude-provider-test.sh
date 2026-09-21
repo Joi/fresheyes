@@ -322,7 +322,7 @@ test_parser_missing_result_writes_failure_log() {
 }
 
 test_manual_detaches_by_default_and_completes() {
-  local run_tmp stdout_file fresh_pid progress_output status self_sid child_sid locator base owner_pid
+  local run_tmp stdout_file fresh_pid progress_output status self_sid child_sid locator base owner_pid sid_reader
   run_tmp="$(mktemp -d "$TEST_TMP/detach.XXXXXX")"
   stdout_file="$run_tmp/stdout.txt"
   rm -f "$ARGV_FILE"
@@ -355,8 +355,8 @@ test_manual_detaches_by_default_and_completes() {
   # timeout cannot kill it. FRESHPID is now an opaque handle, not a pid, so
   # resolve the run's base via the locator, poll status.json for the child's
   # owner_pid, and check THAT process's session while the 2s fake provider
-  # keeps it alive. If the review finishes before ps sees the owner, an empty
-  # child_sid is acceptable — only a MATCHING session is a failure.
+  # keeps it alive. If the review finishes before we can look up the owner, an
+  # empty child_sid is acceptable — only a MATCHING session is a failure.
   locator="$run_tmp/fresheyes-logs/.locator.$fresh_pid"
   [[ -f "$locator" ]] || fail "no locator for handle $fresh_pid"
   base=$(tr -d '\n' < "$locator")
@@ -368,8 +368,18 @@ test_manual_detaches_by_default_and_completes() {
     sleep 0.1
   done
   [[ "$owner_pid" =~ ^[0-9]+$ ]] || fail "status.json never recorded owner_pid"
-  self_sid=$(ps -o sess= -p "$$" | tr -d '[:space:]')
-  child_sid=$(ps -o sess= -p "$owner_pid" 2>/dev/null | tr -d '[:space:]' || true)
+  # `ps -o sess=` prints 0 for every process on macOS, which would make self
+  # and child compare equal and hide a real detach failure. getsid(2) answers
+  # on both platforms, and python3 is already a prerequisite of this test.
+  sid_reader='import os, sys
+try:
+    print(os.getsid(int(sys.argv[1])))
+except (OSError, ValueError):
+    pass'
+  self_sid=$(python3 -c "$sid_reader" "$$" | tr -d '[:space:]')
+  child_sid=$(python3 -c "$sid_reader" "$owner_pid" 2>/dev/null | tr -d '[:space:]' || true)
+  # An unreadable own session id would make the comparison below vacuous.
+  [[ "$self_sid" =~ ^[0-9]+$ ]] || fail "could not read the launcher's own session id"
   if [[ -n "$child_sid" && "$child_sid" == "$self_sid" ]]; then
     fail "detached review shares the launcher's session ($child_sid); setsid did not detach it, so a caller timeout could still kill it"
   fi
