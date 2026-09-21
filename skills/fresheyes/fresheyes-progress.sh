@@ -821,14 +821,15 @@ fi
 # status write failed leaves a stale `running` record, and the poller then
 # reports `died`: that path must withhold the provider's stderr too.
 _HANDLE_STATUS=""
-STATUS_MODE=$(status_file_field "$LOG_FILE" "mode" 2>/dev/null || true)
-if [[ -n "$EXPECTED_HANDLE" && "$STATUS_MODE" != "automatic" ]]; then
-  # Automatic mode is excluded deliberately. Its result is a JSON file the
-  # poller has no way to name, so the only file it could read is the run's
-  # transcript — tee'd provider stdout, which quotes whatever the reviewer read
-  # and would make a good run look like a replay. That mode is a synchronous
-  # commit gate whose own runner verifies the result before approving; the
-  # poller is not in its path.
+if [[ -n "$EXPECTED_HANDLE" ]]; then
+  # Every record, automatic included. Exempting automatic ones was tried and
+  # reverted: it skipped this block entirely, so a `.locator` repointed at a
+  # completed automatic run delivered THAT run's result under this caller's
+  # handle — for the Claude provider the review log IS the structured JSON — and
+  # it skipped the stderr suppression below with it. Reading an automatic
+  # record's log is sound: for Claude it is the JSON result and carries
+  # run_handle; for GPT it is the transcript, which has no marker line and so
+  # reports unverified rather than refusing.
   verify_result_handle "$LOG_FILE"
   _HANDLE_STATUS=$?
   # A DETECTED mismatch withholds whatever the metadata says: the provider's

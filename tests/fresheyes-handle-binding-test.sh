@@ -697,7 +697,10 @@ new_case no-helper-provider-failure
 FAKE_BEHAVIOUR=replay FAKE_EXIT=1 run_fresheyes no-helper-provider-failure --foreground --claude --automatic "Review the staged changes."
 assert_no_leak "automatic replay with no checker and a provider failure"
 [ "$STATUS" -ne 0 ] || fail "automatic run with no checker and a provider failure was approved"
+nohelper_handle="$(current_handle)" || fail "no-helper-provider-failure: no run artifacts"
 RUNNER_PATH="$saved_runner2"
+run_progress no-helper-provider-failure-poll --result "$nohelper_handle"
+assert_no_leak "polling a run whose checker was unavailable and whose provider failed"
 
 # (c) A COMPLETE record whose result is empty reads as `absent`, not
 # unreadable, so the suppression must not depend on the checker's exit code
@@ -834,5 +837,24 @@ printf '%s\n' "$other_base" > "$CASE_DIR/logs/.locator.$CALLER_HANDLE"
 run_progress locator-repoint --result "$CALLER_HANDLE"
 assert_no_leak "a locator repointed at another run must not deliver that run's review"
 assert_equals "$STATUS" "6" "locator repoint exit status"
+
+# (k) The same locator repoint, at a completed AUTOMATIC run. For the Claude
+# provider that run's review log IS its structured result, so a poller that
+# exempted automatic records from the check handed it back under this caller's
+# handle.
+new_case locator-repoint-automatic
+AUTO_OTHER="20261111-222222-aaaa11"
+auto_other_base="$CASE_DIR/logs/fresheyes-$AUTO_OTHER.log"
+cat > "$auto_other_base" <<JSON
+{"approve_commit": false, "issues": [{"severity": "major", "file": "calc.py", "line": 12, "description": "$LEAK: the loop kills a tmux session"}], "run_handle": "$AUTO_OTHER"}
+JSON
+cat > "$auto_other_base.status.json" <<JSON
+{"exit_code":1,"handle":"$AUTO_OTHER","heartbeat_at":1782000000.0,"launched_at":1782000000.0,"log_path":"$auto_other_base","mode":"automatic","provider":"claude","severity":"info","state":"complete","updated_at_epoch":1782000000.0,"verdict":"not_approved"}
+JSON
+AUTO_CALLER="20261111-232323-aaaa12"
+printf '%s\n' "$auto_other_base" > "$CASE_DIR/logs/.locator.$AUTO_CALLER"
+run_progress locator-repoint-automatic --result "$AUTO_CALLER"
+assert_no_leak "a locator repointed at an automatic run must not deliver its result"
+assert_equals "$STATUS" "6" "automatic locator repoint exit status"
 
 printf 'fresheyes-handle-binding tests passed\n'
