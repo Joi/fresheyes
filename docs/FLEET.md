@@ -62,6 +62,20 @@ integration branch; do not open a pull request from it as it stands.
 
 The Claude reviewer default is upstream's, `claude-fable-5-1`.
 
+Since `fleet-2026.09.22` a review result is bound to the run that produced it
+(`fix/result-handle-binding`, upstream pull request 25, kata jibot-code#we92): the
+prompt carries the run's handle and asks for it back as a `FRESHEYES-RUN:` line —
+`run_handle` in automatic mode — and both the runner and `fresheyes-progress.sh`
+refuse a result carrying a DIFFERENT run's marker (state `handle_mismatch`, exit 6,
+the text withheld). A result with no marker is delivered with `handle_verified:false`
+in manual mode and blocks the commit in automatic mode. Two limits are deliberate and
+written down in the spec: a reviewer that copies an old review's body and writes the
+current handle on it is not detected (jibot-code#g0hr owns restricting what the
+reviewer may read), and the poller reports a GPT automatic result as unverified
+because it reads that run's transcript. One defect found while doing it is NOT fixed
+there and is open: jibot-code#w7ts, a `.locator` repointed out of the log directory by
+`..` or a symlink, which `--result` then prints as the review — it predates the fork.
+
 Since `fleet-2026.09.21.3` the Claude reviewer runs read-only
 (`fix/claude-reviewer-read-only`, upstream pull request 23): no bypass flag,
 only Bash/Read/Glob/Grep, only the four git read commands pre-approved, and no
@@ -144,7 +158,9 @@ and start no real review.
 Never run `fresheyes.sh --help`, or any flag it does not know: it takes the
 flag as the review scope and launches a real review (upstream #6).
 
-All seven files pass on macOS as of 2026-09-21 (macct: macOS 26.6.2,
+All eight files pass on macOS as of 2026-09-22 (the eighth is
+`fresheyes-handle-binding-test.sh`, added by jibot-code#we92). Seven passed as of
+2026-09-21 (macct: macOS 26.6.2,
 `/bin/bash` 3.2.57, Homebrew `setsid` installed). Getting there took five
 fixes, and each one hid the next, because a test file stops at its first
 failed assertion. macOS ships bash 3.2 and BSD userland; that is the whole of
