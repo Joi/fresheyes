@@ -135,23 +135,43 @@ and start no real review.
 Never run `fresheyes.sh --help`, or any flag it does not know: it takes the
 flag as the review scope and launches a real review (upstream #6).
 
-On macOS three files fail on unmodified `upstream/main` as well, so a failure
-there is not a regression from our patches (measured 2026-09-21, macOS 26.6.2,
-Homebrew `setsid` installed):
+All seven files pass on macOS as of 2026-09-21 (macct: macOS 26.6.2,
+`/bin/bash` 3.2.57, Homebrew `setsid` installed). Getting there took five
+fixes, and each one hid the next, because a test file stops at its first
+failed assertion. macOS ships bash 3.2 and BSD userland; that is the whole of
+it (kata jibot-code#3scf, upstream PRs #20, #21, #22):
 
-- `fresheyes-claude-provider-test.sh`: the session check reads
-  `ps -o sess=`, which prints `0` for every process on macOS.
-- `fresheyes-detach-test.sh`: the literal `${HOME}` / `$PATH` scope case.
-- `fresheyes-progress-test.sh`: BSD `wc -l` pads its output with spaces.
+- `ps -o sess=` prints `0` for every process, so the detach safety check in
+  `fresheyes-claude-provider-test.sh` compared 0 with 0 and passed for the
+  wrong reason. It now reads `getsid(2)` through python3. Test only.
+- `mapfile` does not exist in bash 3.2, so the fake `systemd-run` in
+  `fresheyes-detach-test.sh` could not model systemd's argv expansion. Test
+  only.
+- `${arg//'$'/'$$'}` in `fresheyes.sh` is a bash 4+ reading. bash 3.2 keeps
+  the quotes as ordinary characters and expands the inner `$$` to its own pid,
+  so a scope's `$` reached the provider as `'12345'`. A product bug, but a
+  latent one: the systemd-run path needs systemd, so no Mac takes it, and
+  Linux runs bash 4.4 or later, where the original spelling is correct.
+- BSD `wc -l` pads its count, and `fresheyes-progress.sh` printed the padding
+  as its legacy numeric progress output and inside `final_lines=`, breaking
+  the space-separated `key=value` shape callers parse. A product bug that did
+  bite on macOS.
+- GNU `find -printf` does not exist on BSD find. The `snapshot_dir` helper in
+  `fresheyes-detach-test.sh` and `fresheyes-progress-test.sh` discarded the
+  error, and under `set -o pipefail` the failing pipeline took both files down
+  at their last test with nothing printed at all. Test only.
 
 On a Mac without `setsid` more of them fail (upstream #16).
 
-Each test file stops at its first failed assertion, so on macOS the assertions
-after those three points do not run at all. A macOS run therefore proves less
-than it appears to: a file counts as a known failure only when its `FAIL` line
-is the one listed above, and a change that touches what those files cover is
-also run on Linux, where upstream develops them, before it is tagged. The Linux
-result has not been measured by us yet.
+A file still stops at its first failed assertion, so read the first `FAIL`
+line rather than counting failures. An rc=1 with no `FAIL` line anywhere in
+the log means a command failed under `set -o pipefail` with its stderr
+discarded; re-run that file under `bash -x` to find it.
+
+The Linux result has still not been measured by us. macct has no container
+runtime and no Homebrew bash, so bash 5 semantics were not exercised there
+either, and a change that touches what these files cover is still run on
+Linux, where upstream develops them, before it is tagged.
 
 ## Tagging
 
