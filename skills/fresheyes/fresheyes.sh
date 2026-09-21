@@ -277,11 +277,14 @@ STREAM_LOG="$LOG_FILE.stream.jsonl"
 STDERR_LOG="$LOG_FILE.stderr"
 STATUS_FILE="$LOG_FILE.status.json"
 LAUNCH_STDERR="$LOG_FILE.launch.stderr"
-# The file that IS this run's result, as opposed to its transcript. Computed
-# here, with the other paths, because status.json records it and the first
-# status write happens before any provider runs (`set -u` would kill the run on
-# an unset variable). Automatic mode's output is named for the handle for the
-# same reason every other artifact is: so it belongs to this run.
+# The file that IS this run's result, as opposed to its transcript: the one file
+# the handle check, the verdict and the caller's output all read. It stays
+# INSIDE the runner. An earlier revision of this branch published it in
+# status.json so the poller could use it too; three review rounds found three
+# generations of defects in treating a recorded path as trustworthy, so the
+# poller makes its own selection and this is written nowhere. Automatic mode's
+# output is still named for the handle, so it belongs to this run like every
+# other artifact.
 if [[ "$MODE" == "automatic" ]]; then
   RESULT_PATH="$LOG_DIR/fresheyes-automatic-$HANDLE.json"
 elif [[ "$PROVIDER" == "gpt" ]]; then
@@ -324,12 +327,12 @@ write_status() {
   local result_handle="${4:-}"
   python3 - "$STATUS_FILE" "$state" "$PROVIDER" "$MODE" "$LOG_FILE" \
     "$exit_code" "$verdict" "${OWNER_PID:-}" "${LAUNCHED_AT_EPOCH:-}" \
-    "${DETACH_METHOD:-}" "$HANDLE" "${RESULT_PATH:-}" "$result_handle" <<'PY'
+    "${DETACH_METHOD:-}" "$HANDLE" "$result_handle" <<'PY'
 import json, os, sys, time
 
 (path, state, provider, mode, log_path,
  exit_code, verdict, owner_pid, launched_at, detach_method,
- run_handle, result_path, result_handle) = sys.argv[1:14]
+ run_handle, result_handle) = sys.argv[1:13]
 
 record = {}
 if os.path.exists(path):
@@ -360,8 +363,6 @@ if detach_method:
     record["detach_method"] = detach_method
 if run_handle:
     record["handle"] = run_handle
-if result_path:
-    record["result_path"] = result_path
 if result_handle:
     record["result_handle"] = result_handle
 

@@ -297,59 +297,15 @@ line_count_or_zero() {
   fi
 }
 
-# The file that IS the run's result, as opposed to its transcript. Verification,
-# delivery and the verdict all read THIS file: verifying one file and printing
-# another would let a verified status endorse text nothing checked. A recorded
-# result_path that will not read is NOT silently replaced by the transcript —
-# the transcript is tee'd provider stdout and holds whatever the reviewer read,
-# including other runs' reviews.
-# Containment for a recorded result_path, checked on the RESOLVED path. A
-# string-prefix test lets `<log dir>/../outside` through, and a plain -f follows
-# a symlink pointing out of the directory; realpath closes both, and resolving
-# the log dirs too keeps /tmp -> /private/tmp (macOS) working.
-_result_path_allowed() {
-  python3 - "$1" "$LOG_DIR" "$GLOBAL_LOG_DIR" <<'PYPATH'
-import os
-import sys
-
-target = sys.argv[1]
-try:
-    real = os.path.realpath(target)
-except OSError:
-    raise SystemExit(1)
-for candidate in sys.argv[2:]:
-    if not candidate:
-        continue
-    try:
-        root = os.path.realpath(candidate)
-    except OSError:
-        continue
-    if real.startswith(root.rstrip(os.sep) + os.sep):
-        raise SystemExit(0)
-raise SystemExit(1)
-PYPATH
-}
-
-# Prints the file that IS the run's result. Return codes matter to the callers:
-#   0  a usable result
-#   1  the record names a result that is not there
-#   2  the record names one that is not allowed (outside the log directories)
-# 1 and 2 must NOT fall back to the transcript: it is tee'd provider stdout and
-# holds whatever the reviewer read, which on a replay is another run's review.
+# The file that IS the run's result. This is upstream's selection, unchanged:
+# the GPT manual sidecar when there is one, otherwise the run's log. An earlier
+# revision of this branch let status.json name the file instead; three review
+# rounds found three generations of defects in that (a confinement that `..`
+# and symlinks walked out of, a fallback to the provider transcript, and an
+# identity a repointed locator could choose), so it is gone. Verification and
+# delivery still read ONE file — this one.
 resolve_result_file() {
   local base="$1"
-  local recorded
-  recorded=$(status_file_field "$base" "result_path" 2>/dev/null || true)
-  if [[ -n "$recorded" ]]; then
-    printf '%s\n' "$recorded"
-    if ! _result_path_allowed "$recorded"; then
-      return 2
-    fi
-    if [[ ! -f "$recorded" ]]; then
-      return 1
-    fi
-    return 0
-  fi
   local provider mode
   provider=$(status_file_field "$base" "provider" 2>/dev/null || true)
   mode=$(status_file_field "$base" "mode" 2>/dev/null || true)
@@ -365,14 +321,14 @@ detect_manual_verdict() {
   local review_file
   # One selection site, with no fallback to the transcript: a verdict read from
   # provider stdout is a verdict from whatever the reviewer happened to read.
-  review_file=$(resolve_result_file "$base") || return 1
+  review_file=$(resolve_result_file "$base")
   python3 "$VERDICT_PARSER" "$review_file" 2>/dev/null
 }
 
 print_final_review_if_nonempty() {
   local base="$1"
   local review_file
-  review_file=$(resolve_result_file "$base") || return 1
+  review_file=$(resolve_result_file "$base")
   if [[ -s "$review_file" ]]; then
     cat "$review_file"
     return 0
@@ -784,11 +740,13 @@ STATUS_RESULT_HANDLE=$(status_file_field "$LOG_FILE" "result_handle" 2>/dev/null
 #     _find_base_for_pid_in_dir, which matches fresheyes-*-<pid>.log, so a
 #     caller may legitimately poll with a SUFFIX of the real handle, and
 #     comparing a correct marker against that suffix accuses a good review.
-# So: the polled handle, widened to the resolved file's name ONLY when the
-# polled handle is a suffix of it, which is exactly the glob case.
+# So: the polled handle, widened to the resolved file's name ONLY when the name
+# ends in "-<polled handle>" — which is the glob's own rule, fresheyes-*-<pid>.log.
+# A bare string suffix would be broader than the glob and lets a repointed
+# locator through: the legacy handle 1234 is a suffix of ...-ab1234.
 BASE_HANDLE="$(_handle_from_base "$LOG_FILE")"
 EXPECTED_HANDLE="$PID"
-if [[ -n "$PID" && -n "$BASE_HANDLE" && "$BASE_HANDLE" != "$PID" && "$BASE_HANDLE" == *"$PID" ]]; then
+if [[ -n "$PID" && -n "$BASE_HANDLE" && "$BASE_HANDLE" != "$PID" && "$BASE_HANDLE" == *-"$PID" ]]; then
   EXPECTED_HANDLE="$BASE_HANDLE"
 fi
 if [[ -z "$EXPECTED_HANDLE" ]]; then
@@ -814,12 +772,7 @@ WITHHOLD_STDERR=0
 verify_result_handle() {
   local base="$1"
   local review_file output status
-  if ! review_file=$(resolve_result_file "$base"); then
-    # The record names a result that is missing or not allowed: nothing to
-    # verify and nothing to deliver.
-    HANDLE_VERIFIED="false"
-    return 7
-  fi
+  review_file=$(resolve_result_file "$base")
   output="$(python3 "$HANDLE_PARSER" "$review_file" "$EXPECTED_HANDLE" 2>/dev/null)"
   status=$?
   case "$status" in
@@ -870,11 +823,15 @@ _HANDLE_STATUS=""
 if [[ -n "$EXPECTED_HANDLE" ]]; then
   verify_result_handle "$LOG_FILE"
   _HANDLE_STATUS=$?
-  # An unmarked result still delivers (that is the fail-open rule), but the
-  # provider's stderr is a second, unverifiable copy and stays withheld unless
-  # the result verified as this run's. A record with no `handle` at all is a
-  # pre-change run: nothing to withhold from, and its diagnostics are unchanged.
-  if [[ "$HANDLE_VERIFIED" != "true" && -n "$STATUS_HANDLE" ]]; then
+  # A DETECTED mismatch withholds whatever the metadata says: the provider's
+  # stderr is a second copy of the same refused text, and a record can reach the
+  # `died` branch (state=failed) where that tail would otherwise be quoted.
+  # Short of a mismatch, the suppression applies to runs this tooling produced —
+  # a record with no `handle` is a pre-change run whose result is delivered
+  # unverified by design, and its diagnostics are unchanged.
+  if [[ "$_HANDLE_STATUS" == "6" ]]; then
+    WITHHOLD_STDERR=1
+  elif [[ "$HANDLE_VERIFIED" != "true" && -n "$STATUS_HANDLE" ]]; then
     WITHHOLD_STDERR=1
   fi
 fi

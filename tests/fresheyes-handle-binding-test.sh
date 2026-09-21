@@ -315,7 +315,7 @@ seed_prior_run() {
   } > "$base"
   prior_review_text > "$base.result.md"
   cat > "$base.status.json" <<JSON
-{"exit_code":0,"handle":"$PRIOR_HANDLE","heartbeat_at":1767225600.0,"launched_at":1767225500.0,"log_path":"$base","mode":"manual","provider":"gpt","result_path":"$base.result.md","severity":"info","state":"complete","updated_at_epoch":1767225600.0,"verdict":"failed"}
+{"exit_code":0,"handle":"$PRIOR_HANDLE","heartbeat_at":1767225600.0,"launched_at":1767225500.0,"log_path":"$base","mode":"manual","provider":"gpt","severity":"info","state":"complete","updated_at_epoch":1767225600.0,"verdict":"failed"}
 JSON
   printf '%s\n' "$base" > "$dir/.locator.$PRIOR_HANDLE"
   cat > "$dir/fresheyes-automatic-$PRIOR_HANDLE.json" <<JSON
@@ -520,7 +520,7 @@ poller_base="$CASE_DIR/logs/fresheyes-$POLLER_HANDLE.log"
 prior_review_text > "$poller_base.result.md"      # a FOREIGN marker
 printf 'transcript line\n' > "$poller_base"
 cat > "$poller_base.status.json" <<JSON
-{"exit_code":0,"handle":"$POLLER_HANDLE","heartbeat_at":1770000000.0,"launched_at":1770000000.0,"log_path":"$poller_base","mode":"manual","provider":"gpt","result_path":"$poller_base.result.md","severity":"info","state":"complete","updated_at_epoch":1770000000.0,"verdict":"failed"}
+{"exit_code":0,"handle":"$POLLER_HANDLE","heartbeat_at":1770000000.0,"launched_at":1770000000.0,"log_path":"$poller_base","mode":"manual","provider":"gpt","severity":"info","state":"complete","updated_at_epoch":1770000000.0,"verdict":"failed"}
 JSON
 printf '%s\n' "$poller_base" > "$CASE_DIR/logs/.locator.$POLLER_HANDLE"
 
@@ -547,7 +547,7 @@ printf '%s\n' \
   '**INDEPENDENT CODE REVIEW PASSED**' \
   "FRESHEYES-RUN: $CONTROL_HANDLE" > "$control_base.result.md"
 cat > "$control_base.status.json" <<JSON
-{"exit_code":0,"handle":"$CONTROL_HANDLE","heartbeat_at":1770000000.0,"launched_at":1770000000.0,"log_path":"$control_base","mode":"manual","provider":"gpt","result_path":"$control_base.result.md","severity":"info","state":"complete","updated_at_epoch":1770000000.0,"verdict":"passed"}
+{"exit_code":0,"handle":"$CONTROL_HANDLE","heartbeat_at":1770000000.0,"launched_at":1770000000.0,"log_path":"$control_base","mode":"manual","provider":"gpt","severity":"info","state":"complete","updated_at_epoch":1770000000.0,"verdict":"passed"}
 JSON
 printf '%s\n' "$control_base" > "$CASE_DIR/logs/.locator.$CONTROL_HANDLE"
 
@@ -708,7 +708,7 @@ empty_base="$CASE_DIR/logs/fresheyes-$EMPTY_HANDLE.log"
 : > "$empty_base.result.md"
 printf 'provider noise\n%s: the loop kills a tmux session\nfake trailer\n' "$LEAK" > "$empty_base.stderr"
 cat > "$empty_base.status.json" <<JSON
-{"exit_code":0,"handle":"$EMPTY_HANDLE","heartbeat_at":1776000000.0,"launched_at":1776000000.0,"log_path":"$empty_base","mode":"manual","provider":"claude","result_path":"$empty_base","severity":"info","state":"complete","updated_at_epoch":1776000000.0,"verdict":"passed"}
+{"exit_code":0,"handle":"$EMPTY_HANDLE","heartbeat_at":1776000000.0,"launched_at":1776000000.0,"log_path":"$empty_base","mode":"manual","provider":"claude","severity":"info","state":"complete","updated_at_epoch":1776000000.0,"verdict":"passed"}
 JSON
 printf '%s\n' "$empty_base" > "$CASE_DIR/logs/.locator.$EMPTY_HANDLE"
 run_progress empty-result-result --result "$EMPTY_HANDLE"
@@ -722,28 +722,12 @@ refused_base="$CASE_DIR/logs/fresheyes-$REFUSED_HANDLE.log"
 prior_review_text > "$refused_base.result.md"
 printf 'transcript\n' > "$refused_base"
 cat > "$refused_base.status.json" <<JSON
-{"exit_code":0,"handle":"$REFUSED_HANDLE","heartbeat_at":1774000000.0,"launched_at":1774000000.0,"log_path":"$refused_base","mode":"manual","provider":"gpt","result_path":"$refused_base.result.md","severity":"info","state":"complete","updated_at_epoch":1774000000.0,"verdict":"passed"}
+{"exit_code":0,"handle":"$REFUSED_HANDLE","heartbeat_at":1774000000.0,"launched_at":1774000000.0,"log_path":"$refused_base","mode":"manual","provider":"gpt","severity":"info","state":"complete","updated_at_epoch":1774000000.0,"verdict":"passed"}
 JSON
 printf '%s\n' "$refused_base" > "$CASE_DIR/logs/.locator.$REFUSED_HANDLE"
 run_progress refused-verdict-json --json "$REFUSED_HANDLE"
 assert_contains "$(cat "$OUT_FILE")" '"state":"handle_mismatch"' "refused verdict state"
 assert_not_contains "$(cat "$OUT_FILE")" '"verdict"' "a refused result must carry no verdict"
-
-# (e) status.json lives in a shared directory, so result_path is untrusted
-# input. A record naming a file outside the log dir must not make --result print
-# that file as "the review".
-new_case result-path-escape
-ESCAPE_HANDLE="20260505-151515-aaaaab"
-escape_base="$CASE_DIR/logs/fresheyes-$ESCAPE_HANDLE.log"
-printf 'SECRET-OUTSIDE-THE-LOG-DIR\n' > "$TEST_TMP/outside.txt"
-printf '## Files Examined\n- calc.py\n\n**INDEPENDENT CODE REVIEW PASSED**\nFRESHEYES-RUN: %s\n' "$ESCAPE_HANDLE" > "$escape_base"
-cat > "$escape_base.status.json" <<JSON
-{"exit_code":0,"handle":"$ESCAPE_HANDLE","heartbeat_at":1775000000.0,"launched_at":1775000000.0,"log_path":"$escape_base","mode":"manual","provider":"claude","result_path":"$TEST_TMP/outside.txt","severity":"info","state":"complete","updated_at_epoch":1775000000.0,"verdict":"passed"}
-JSON
-printf '%s\n' "$escape_base" > "$CASE_DIR/logs/.locator.$ESCAPE_HANDLE"
-run_progress result-path-escape --result "$ESCAPE_HANDLE"
-assert_not_contains "$(cat "$OUT_FILE")" "SECRET-OUTSIDE-THE-LOG-DIR" \
-  "a result_path outside the log dir must not be printed as the review"
 
 # (f) A handle resolves through a glob that matches a SUFFIX of it, so a caller
 # can legitimately poll with less than the full handle. That is a resolution
@@ -759,29 +743,23 @@ run_progress suffix-poll-result --result "$suffix_tail"
 assert_equals "$STATUS" "0" "polling with a handle suffix must not refuse a correct review"
 assert_contains "$(cat "$OUT_FILE")" "INDEPENDENT CODE REVIEW PASSED" "suffix poll delivers the review"
 
-# (g) Containment is on the RESOLVED path: a prefix test lets ../ through and a
-# plain -f follows a symlink out of the directory.
-new_case result-path-traversal
-for escape in traversal symlink; do
-  esc_handle="20260707-171717-aaaa0${escape:0:1}"
-  esc_base="$CASE_DIR/logs/fresheyes-$esc_handle.log"
-  printf 'SECRET-OUTSIDE-THE-LOG-DIR\n' > "$TEST_TMP/outside-$escape.txt"
-  printf '## Files Examined\n- calc.py\n\n**INDEPENDENT CODE REVIEW PASSED**\nFRESHEYES-RUN: %s\n' "$esc_handle" > "$esc_base"
-  if [ "$escape" = "traversal" ]; then
-    esc_target="$CASE_DIR/logs/../../outside-$escape.txt"
-    printf 'SECRET-OUTSIDE-THE-LOG-DIR\n' > "$TEST_TMP/outside-$escape.txt"
-  else
-    esc_target="$CASE_DIR/logs/link-$escape.md"
-    ln -sf "$TEST_TMP/outside-$escape.txt" "$esc_target"
-  fi
-  cat > "$esc_base.status.json" <<JSON
-{"exit_code":0,"handle":"$esc_handle","heartbeat_at":1777000000.0,"launched_at":1777000000.0,"log_path":"$esc_base","mode":"manual","provider":"claude","result_path":"$esc_target","severity":"info","state":"complete","updated_at_epoch":1777000000.0,"verdict":"passed"}
+# (g) The poller makes its own selection: a status file that names some other
+# file as the result changes nothing. (An earlier revision let status.json name
+# it, and a path escaping the log dir was then printed as "the review".)
+new_case result-path-ignored
+IGNORED_HANDLE="20260707-171717-aaaa0b"
+ignored_base="$CASE_DIR/logs/fresheyes-$IGNORED_HANDLE.log"
+printf 'SECRET-OUTSIDE-THE-LOG-DIR\n' > "$TEST_TMP/outside.txt"
+printf '## Files Examined\n- calc.py\n\n**INDEPENDENT CODE REVIEW PASSED**\nFRESHEYES-RUN: %s\n' "$IGNORED_HANDLE" > "$ignored_base"
+cat > "$ignored_base.status.json" <<JSON
+{"exit_code":0,"handle":"$IGNORED_HANDLE","heartbeat_at":1777000000.0,"launched_at":1777000000.0,"log_path":"$ignored_base","mode":"manual","provider":"claude","result_path":"$TEST_TMP/outside.txt","severity":"info","state":"complete","updated_at_epoch":1777000000.0,"verdict":"passed"}
 JSON
-  printf '%s\n' "$esc_base" > "$CASE_DIR/logs/.locator.$esc_handle"
-  run_progress "result-path-$escape" --result "$esc_handle"
-  assert_not_contains "$(cat "$OUT_FILE")" "SECRET-OUTSIDE-THE-LOG-DIR" \
-    "a result_path escaping the log dir by $escape must not be printed as the review"
-done
+printf '%s\n' "$ignored_base" > "$CASE_DIR/logs/.locator.$IGNORED_HANDLE"
+run_progress result-path-ignored --result "$IGNORED_HANDLE"
+assert_not_contains "$(cat "$OUT_FILE")" "SECRET-OUTSIDE-THE-LOG-DIR" \
+  "a path named in status.json must not be printed as the review"
+assert_contains "$(cat "$OUT_FILE")" "INDEPENDENT CODE REVIEW PASSED" \
+  "the run's own result is delivered regardless of what status.json names"
 
 # (h) A record that names a DIFFERENT run must not have its own review verified
 # against its own claim: the expectation comes from the resolved file name.
@@ -791,7 +769,7 @@ impostor_base="$CASE_DIR/logs/fresheyes-$IMPOSTOR_HANDLE.log"
 prior_review_text > "$impostor_base.result.md"
 printf 'transcript\n' > "$impostor_base"
 cat > "$impostor_base.status.json" <<JSON
-{"exit_code":0,"handle":"$PRIOR_HANDLE","heartbeat_at":1778000000.0,"launched_at":1778000000.0,"log_path":"$impostor_base","mode":"manual","provider":"gpt","result_path":"$impostor_base.result.md","severity":"info","state":"complete","updated_at_epoch":1778000000.0,"verdict":"failed"}
+{"exit_code":0,"handle":"$PRIOR_HANDLE","heartbeat_at":1778000000.0,"launched_at":1778000000.0,"log_path":"$impostor_base","mode":"manual","provider":"gpt","severity":"info","state":"complete","updated_at_epoch":1778000000.0,"verdict":"failed"}
 JSON
 printf '%s\n' "$impostor_base" > "$CASE_DIR/logs/.locator.$IMPOSTOR_HANDLE"
 run_progress foreign-identity --result "$IMPOSTOR_HANDLE"
@@ -823,7 +801,7 @@ other_base="$CASE_DIR/logs/fresheyes-$OTHER_HANDLE.log"
 prior_review_text > "$other_base.result.md"
 printf 'transcript\n' > "$other_base"
 cat > "$other_base.status.json" <<JSON
-{"exit_code":0,"handle":"$OTHER_HANDLE","heartbeat_at":1780000000.0,"launched_at":1780000000.0,"log_path":"$other_base","mode":"manual","provider":"gpt","result_path":"$other_base.result.md","severity":"info","state":"complete","updated_at_epoch":1780000000.0,"verdict":"failed"}
+{"exit_code":0,"handle":"$OTHER_HANDLE","heartbeat_at":1780000000.0,"launched_at":1780000000.0,"log_path":"$other_base","mode":"manual","provider":"gpt","severity":"info","state":"complete","updated_at_epoch":1780000000.0,"verdict":"failed"}
 JSON
 # The other run's result carries the other run's own marker: genuine for it.
 python3 - "$other_base.result.md" "$OTHER_HANDLE" <<'PYMARK'

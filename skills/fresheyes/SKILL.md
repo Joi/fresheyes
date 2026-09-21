@@ -92,7 +92,7 @@ Each poll returns one JSON line. The `state` field and the command's exit code t
 | `running` | 0 | fresh heartbeat; review in progress | keep polling every 30-60s |
 | `complete` | 0 | verdict present (`verdict`: `passed`/`failed`) | fetch the review with `--result` (Step 7) |
 | `killed_at_launch` | 3 | the child never wrote its first heartbeat | do what the `message` says: re-run the SAME command with `--foreground`, with a harness/exec timeout longer than the review (5-30 min) |
-| `died` | 4 | heartbeat went stale and the review process is gone, no verdict | inspect the log at the path in `message` first (evidence); optionally re-run with `--foreground` |
+| `died` | 4 | heartbeat went stale and the review process is gone, no verdict | do what the `message` says: it either points at the log as evidence, or — when the run's output could not be tied to this run — says the log must NOT be read back; optionally re-run with `--foreground` |
 | `unknown_handle` | 5 | no tracker for this handle | the handle is wrong, or its trackers were removed (e.g. /tmp cleanup); re-check the receipt, else relaunch |
 | `handle_mismatch` | 6 | the result carries a DIFFERENT review run's marker, or could not be tied to this run at all | do not use the text and do not read the log back for it — it is another review's. Relaunch from Step 4 and tell the user the review was refused |
 
