@@ -57,6 +57,8 @@ if sys.argv[1:] == ["--version"]:
 argv_file = os.environ["FRESHEYES_FAKE_ARGV"]
 with open(argv_file, "w", encoding="utf-8") as handle:
     json.dump(sys.argv[1:], handle)
+with open(argv_file + ".env", "w", encoding="utf-8") as handle:
+    json.dump({"GIT_OPTIONAL_LOCKS": os.environ.get("GIT_OPTIONAL_LOCKS")}, handle)
 
 mode = os.environ.get("FRESHEYES_FAKE_MODE")
 if not mode:
@@ -125,6 +127,59 @@ read_latest_file() {
   latest=$(ls -t "$dir"/fresheyes-logs/$glob 2>/dev/null | head -1)
   [[ -n "$latest" ]] || fail "No file matched $glob in $dir/fresheyes-logs"
   printf '%s\n' "$latest"
+}
+
+# The reviewer must be read-only. --allowedTools only pre-approves tools; it
+# removes none, and a bypass flag approves everything else. These assertions pin
+# the flags that do restrict, for every launch path (manual, automatic, detached).
+assert_restricted_argv() {
+  "$PYTHON" - "$ARGV_FILE" <<'PY'
+import json
+import sys
+
+argv = json.load(open(sys.argv[1], encoding="utf-8"))
+env = json.load(open(sys.argv[1] + ".env", encoding="utf-8"))
+
+if "--" not in argv:
+    raise SystemExit(f"missing -- prompt separator: {argv!r}")
+flags = argv[:argv.index("--")]
+
+for forbidden in ["--dangerously-skip-permissions", "--allow-dangerously-skip-permissions", "bypassPermissions"]:
+    if forbidden in argv:
+        raise SystemExit(f"reviewer launched with {forbidden}: {argv!r}")
+
+def value_of(flag):
+    if flags.count(flag) != 1:
+        raise SystemExit(f"expected exactly one {flag} before --: {argv!r}")
+    idx = flags.index(flag)
+    if idx + 1 >= len(flags):
+        raise SystemExit(f"{flag} has no value: {argv!r}")
+    return flags[idx + 1]
+
+expected = {
+    "--tools": "Bash,Read,Glob,Grep",
+    "--allowedTools": "Bash(git diff:*,git show:*,git log:*,git status:*),Read,Glob,Grep",
+    "--permission-mode": "dontAsk",
+    "--setting-sources": "",
+}
+for flag, want in expected.items():
+    got = value_of(flag)
+    if got != want:
+        raise SystemExit(f"{flag} was {got!r}, expected {want!r}: {argv!r}")
+if "--strict-mcp-config" not in flags:
+    raise SystemExit(f"missing --strict-mcp-config before --: {argv!r}")
+if "--mcp-config" in flags:
+    raise SystemExit(f"unexpected --mcp-config: {argv!r}")
+# A `timeout`-wrapped git command is denied, and the review prompt asks for
+# that wrapper, so the launch must tell the reviewer to run git bare.
+if "timeout" not in value_of("--append-system-prompt"):
+    raise SystemExit(f"--append-system-prompt does not tell the reviewer to run git without timeout: {argv!r}")
+
+# The test exports GIT_OPTIONAL_LOCKS=1, so only the launcher's own assignment
+# can produce the 0 seen here. Without it `git status` rewrites .git/index.
+if env.get("GIT_OPTIONAL_LOCKS") != "0":
+    raise SystemExit(f"GIT_OPTIONAL_LOCKS was {env.get('GIT_OPTIONAL_LOCKS')!r} in the reviewer's environment, expected '0'")
+PY
 }
 
 assert_manual_argv() {
@@ -222,6 +277,7 @@ run_runner_capture() {
     FRESHEYES_FAKE_CLAUDE_VERSION_PROBE="$VERSION_PROBE_FILE" \
     PATH="$FAKE_BIN:$PATH" \
     FRESHEYES_FAKE_ARGV="$ARGV_FILE" \
+    GIT_OPTIONAL_LOCKS=1 \
     timeout 30s bash "$RUNNER" "$@" > "$stdout_file"; then
     printf 'Runner failed or timed out. stdout:\n' >&2
     cat "$stdout_file" >&2 2>/dev/null || true
@@ -233,12 +289,13 @@ test_manual_claude_invocation_uses_streaming_flags() {
   local run_tmp output log_file stdout_file
   run_tmp="$(mktemp -d "$TEST_TMP/manual.XXXXXX")"
   stdout_file="$run_tmp/stdout.txt"
-  rm -f "$ARGV_FILE"
+  rm -f "$ARGV_FILE" "$ARGV_FILE.env"
 
   run_runner_capture "$run_tmp" "$stdout_file" --foreground --claude "Review README.md."
   output=$(cat "$stdout_file")
 
   assert_manual_argv
+  assert_restricted_argv
   [[ -s "$VERSION_PROBE_FILE" ]] || fail "Fable 5.1 review did not verify the Claude Code version"
   assert_contains "$output" "INDEPENDENT CODE REVIEW PASSED" "manual Claude output"
   assert_contains "$output" "- README.md" "manual Claude output preserves the first files list"
@@ -256,12 +313,13 @@ test_automatic_claude_extracts_structured_output() {
   local run_tmp output output_file stdout_file
   run_tmp="$(mktemp -d "$TEST_TMP/automatic.XXXXXX")"
   stdout_file="$run_tmp/stdout.txt"
-  rm -f "$ARGV_FILE"
+  rm -f "$ARGV_FILE" "$ARGV_FILE.env"
 
   run_runner_capture "$run_tmp" "$stdout_file" --claude --mode automatic "Review staged changes."
   output=$(cat "$stdout_file")
 
   assert_automatic_argv
+  assert_restricted_argv
   assert_contains "$output" "Fresh Eyes: approved." "automatic Claude output"
   output_file=$(read_latest_file "$run_tmp" 'fresheyes-automatic-*.json')
   assert_automatic_output_json "$output_file"
@@ -274,7 +332,7 @@ test_default_log_dir_uses_global_log_dir() {
   run_tmp="$(mktemp -d "$TEST_TMP/default-log.XXXXXX")"
   stdout_file="$run_tmp/stdout.txt"
   mkdir -p "$run_tmp/tmp"
-  rm -f "$ARGV_FILE"
+  rm -f "$ARGV_FILE" "$ARGV_FILE.env"
 
   if ! TMPDIR="$run_tmp/tmp" \
     FRESHEYES_GLOBAL_LOG_DIR="$run_tmp/global-fresheyes-logs" \
@@ -327,7 +385,7 @@ test_manual_detaches_by_default_and_completes() {
   local run_tmp stdout_file fresh_pid progress_output status self_sid child_sid locator base owner_pid sid_reader
   run_tmp="$(mktemp -d "$TEST_TMP/detach.XXXXXX")"
   stdout_file="$run_tmp/stdout.txt"
-  rm -f "$ARGV_FILE"
+  rm -f "$ARGV_FILE" "$ARGV_FILE.env"
 
   # Slow the fake provider (2s) so the detached review is provably STILL RUNNING
   # when the launch call returns. That gives us a window to (a) prove the launch
@@ -338,6 +396,7 @@ test_manual_detaches_by_default_and_completes() {
     PATH="$FAKE_BIN:$PATH" \
     FRESHEYES_FAKE_ARGV="$ARGV_FILE" \
     FRESHEYES_FAKE_DELAY="2" \
+    GIT_OPTIONAL_LOCKS=1 \
     timeout 30s bash "$RUNNER" --claude "Review README.md." > "$stdout_file"; then
     printf 'Default manual launch failed or timed out. stdout:\n' >&2
     cat "$stdout_file" >&2 2>/dev/null || true
@@ -370,6 +429,15 @@ test_manual_detaches_by_default_and_completes() {
     sleep 0.1
   done
   [[ "$owner_pid" =~ ^[0-9]+$ ]] || fail "status.json never recorded owner_pid"
+  # The detached child is a separate launch path: it must carry the same
+  # restricted argv as the foreground one. The provider writes its argv when it
+  # starts, which can be a moment after owner_pid appears.
+  for _ in $(seq 1 100); do
+    [[ -s "$ARGV_FILE.env" ]] && break
+    sleep 0.1
+  done
+  [[ -s "$ARGV_FILE.env" ]] || fail "detached provider never started: no argv was recorded"
+  assert_restricted_argv
   # `ps -o sess=` prints 0 for every process on macOS, which would make self
   # and child compare equal and hide a real detach failure. getsid(2) answers
   # on both platforms, and python3 is already a prerequisite of this test.
@@ -411,7 +479,7 @@ test_manual_foreground_runs_synchronously() {
   local run_tmp stdout_file output
   run_tmp="$(mktemp -d "$TEST_TMP/foreground.XXXXXX")"
   stdout_file="$run_tmp/stdout.txt"
-  rm -f "$ARGV_FILE"
+  rm -f "$ARGV_FILE" "$ARGV_FILE.env"
 
   run_runner_capture "$run_tmp" "$stdout_file" --foreground --claude "Review README.md."
   output=$(cat "$stdout_file")
@@ -426,7 +494,7 @@ test_automatic_mode_does_not_detach() {
   local run_tmp stdout_file output
   run_tmp="$(mktemp -d "$TEST_TMP/auto-nodetach.XXXXXX")"
   stdout_file="$run_tmp/stdout.txt"
-  rm -f "$ARGV_FILE"
+  rm -f "$ARGV_FILE" "$ARGV_FILE.env"
 
   run_runner_capture "$run_tmp" "$stdout_file" --mode automatic --claude "Review staged changes."
   output=$(cat "$stdout_file")
@@ -442,7 +510,7 @@ test_fable_5_1_rejects_old_claude_code() {
   run_tmp="$(mktemp -d "$TEST_TMP/old-claude.XXXXXX")"
   stdout_file="$run_tmp/stdout.txt"
   stderr_file="$run_tmp/stderr.txt"
-  rm -f "$ARGV_FILE"
+  rm -f "$ARGV_FILE" "$ARGV_FILE.env"
 
   # 2.1.256 sits between the two gates: fine for a Fable 5 override, too old
   # for the Fable 5.1 default.
@@ -471,7 +539,7 @@ test_fable_5_1_accepts_exact_minimum() {
   run_tmp="$(mktemp -d "$TEST_TMP/boundary.XXXXXX")"
   stdout_file="$run_tmp/stdout.txt"
   stderr_file="$run_tmp/stderr.txt"
-  rm -f "$ARGV_FILE"
+  rm -f "$ARGV_FILE" "$ARGV_FILE.env"
 
   # Exact-boundary acceptance: the new minimum itself must pass (pins
   # version_at_least and the floor constant against off-by-one).
@@ -510,7 +578,7 @@ test_fable_5_override_keeps_its_own_gate() {
 
   # Claude Code 2.1.170 (exactly the Fable 5 minimum, below the Fable 5.1
   # minimum) runs a Fable 5 override fine.
-  rm -f "$ARGV_FILE"
+  rm -f "$ARGV_FILE" "$ARGV_FILE.env"
   if ! TMPDIR="$run_tmp" \
     FRESHEYES_LOG_DIR="$run_tmp/fresheyes-logs" \
     FRESHEYES_GLOBAL_LOG_DIR="$run_tmp/global-fresheyes-logs" \
@@ -540,7 +608,7 @@ PY
 
   # ...but below its own 2.1.170 floor, the override is still rejected.
   stderr_file="$run_tmp/stderr-old.txt"
-  rm -f "$ARGV_FILE"
+  rm -f "$ARGV_FILE" "$ARGV_FILE.env"
   set +e
   TMPDIR="$run_tmp" \
     FRESHEYES_LOG_DIR="$run_tmp/fresheyes-logs" \
@@ -565,7 +633,7 @@ test_claude_specific_model_override_wins() {
   local run_tmp stdout_file
   run_tmp="$(mktemp -d "$TEST_TMP/claude-override.XXXXXX")"
   stdout_file="$run_tmp/stdout.txt"
-  rm -f "$ARGV_FILE"
+  rm -f "$ARGV_FILE" "$ARGV_FILE.env"
 
   TMPDIR="$run_tmp" \
     FRESHEYES_LOG_DIR="$run_tmp/fresheyes-logs" \
