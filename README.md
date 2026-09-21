@@ -34,6 +34,8 @@ GPT-6 Astra requires Codex CLI 0.153.1 or newer. Manual GPT reviews use GPT-6 As
 
 Claude Fable 5.1 requires Claude Code 2.1.257 or newer. Manual Claude reviews use Fable 5.1 with Extra High reasoning by default; automatic reviews use Fable 5.1 with Medium reasoning. Fable 5.1 is available to Pro, Max, Team, and Enterprise users, as well as through usage credits and API access.
 
+The Claude reviewer runs read-only: it can read files and run `git diff`, `git show`, `git log` and `git status`, and it cannot edit files or run other programs. It does not load your Claude Code settings, hooks, plugins or MCP servers, so it needs a logged-in CLI; an `apiKeyHelper` or `env` block in `settings.json` is ignored.
+
 Note that Claude reviews count against your Claude overage, not your subscription _(shakes fist at universe)_.
 
 ## How to do it:
