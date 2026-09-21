@@ -64,6 +64,15 @@ mode = os.environ.get("FRESHEYES_FAKE_MODE")
 if not mode:
     mode = "automatic" if "--json-schema" in sys.argv else "manual"
 
+# The run's handle reaches the reviewer only through the prompt: the launch
+# strips FRESHEYES_HANDLE from the environment. Echoing it back is also the
+# assertion that {{RUN_HANDLE}} was substituted.
+import re
+run_handle = ""
+if sys.argv[1:]:
+    found = re.search(r"FRESHEYES-RUN:\s*([A-Za-z0-9][A-Za-z0-9._-]*)", sys.argv[-1])
+    run_handle = found.group(1) if found else ""
+
 delay = float(os.environ.get("FRESHEYES_FAKE_DELAY", "0"))
 
 def emit(obj):
@@ -100,7 +109,7 @@ if mode == "automatic":
         "subtype": "success",
         "is_error": False,
         "result": "Done.",
-        "structured_output": {"approve_commit": True, "issues": []},
+        "structured_output": {"approve_commit": True, "issues": [], "run_handle": run_handle},
     })
 else:
     emit({
@@ -113,7 +122,8 @@ else:
             "## Issues Found\n\n"
             "- A fixture quotes this heading without replacing the review:"
             "\n\n## Files Examined\n\n"
-            "INDEPENDENT CODE REVIEW PASSED"
+            "INDEPENDENT CODE REVIEW PASSED\n"
+            "FRESHEYES-RUN: %s" % run_handle
         ),
     })
 PY
@@ -248,16 +258,43 @@ if schema_idx + 1 >= len(argv) or "approve_commit" not in argv[schema_idx + 1]:
 PY
 }
 
+# The handle the runner minted for the latest run, read from the prompt it sent.
+expected_run_handle() {
+  "$PYTHON" - "$ARGV_FILE" <<'PYHANDLE'
+import json
+import re
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as fh:
+        argv = json.load(fh)
+except Exception:
+    print("")
+    raise SystemExit(0)
+found = re.search(r"FRESHEYES-RUN:\s*([A-Za-z0-9][A-Za-z0-9._-]*)", argv[-1] if argv else "")
+print(found.group(1) if found else "")
+PYHANDLE
+}
+
 assert_automatic_output_json() {
   local json_file="$1"
-  "$PYTHON" - "$json_file" <<'PY'
+  "$PYTHON" - "$json_file" "${2:-}" <<'PY'
 import json
 import sys
 
 with open(sys.argv[1], encoding="utf-8") as handle:
     data = json.load(handle)
-if data != {"approve_commit": True, "issues": []}:
+if data.get("approve_commit") is not True or data.get("issues") != []:
     raise SystemExit(f"unexpected automatic output: {data!r}")
+# The result must name the run it belongs to, and the handle must be this run's.
+run_handle = data.get("run_handle")
+if not isinstance(run_handle, str) or not run_handle:
+    raise SystemExit(f"automatic output carries no run_handle: {data!r}")
+expected = sys.argv[2] if len(sys.argv) > 2 else ""
+if not expected:
+    raise SystemExit("no expected run handle was passed: the comparison would not run")
+if run_handle != expected:
+    raise SystemExit(f"automatic output carries another run's handle: {run_handle!r}")
 PY
 }
 
@@ -322,7 +359,7 @@ test_automatic_claude_extracts_structured_output() {
   assert_restricted_argv
   assert_contains "$output" "Fresh Eyes: approved." "automatic Claude output"
   output_file=$(read_latest_file "$run_tmp" 'fresheyes-automatic-*.json')
-  assert_automatic_output_json "$output_file"
+  assert_automatic_output_json "$output_file" "$(expected_run_handle)"
   assert_contains "$(cat "$(read_latest_file "$run_tmp" 'fresheyes-*.log.status.json')")" '"state":"complete"' "automatic Claude status"
   assert_contains "$(cat "$(read_latest_file "$run_tmp" 'fresheyes-*.log.status.json')")" '"verdict":"approved"' "automatic Claude status"
 }

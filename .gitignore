@@ -1,2 +1,4 @@
 .opencode/
 .worktrees/
+__pycache__/
+*.pyc
