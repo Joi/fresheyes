@@ -137,7 +137,32 @@ write_locator_alias() {
 
 snapshot_dir() {
   # Stable fingerprint of every file's path, size, and mtime under a dir.
-  find "$1" -mindepth 1 -printf '%p %s %T@\n' 2>/dev/null | sort
+  # `find -printf` is GNU-only — on BSD find it fails, and under `set -o
+  # pipefail` that aborted this file's last test outright. python3 is already
+  # a prerequisite of this suite and walks the tree the same way.
+  "$PYTHON" - "$1" <<'SNAPSHOT_PY'
+import os
+import sys
+
+
+def reraise(error):
+    raise error
+
+
+root = sys.argv[1]
+rows = []
+# A tree this cannot read is a failed fingerprint, not a short one: an
+# ignored error would leave before and after agreeing about a subtree
+# neither of them looked at. os.walk swallows its errors unless onerror
+# raises, and lstat failures are left to propagate for the same reason.
+for dirpath, dirnames, filenames in os.walk(root, onerror=reraise):
+    for name in dirnames + filenames:
+        path = os.path.join(dirpath, name)
+        info = os.lstat(path)
+        rows.append("%s %d %r" % (path, info.st_size, info.st_mtime))
+for row in sorted(rows):
+    print(row)
+SNAPSHOT_PY
 }
 
 write_claude_events() {
