@@ -697,16 +697,22 @@ assert_no_leak "automatic replay with no checker and a provider failure"
 [ "$STATUS" -ne 0 ] || fail "automatic run with no checker and a provider failure was approved"
 RUNNER_PATH="$saved_runner2"
 
-# (c) A recorded result that is EMPTY reads as `absent`, not unreadable: the
-# suppression must not depend on the checker's exit code alone.
+# (c) A COMPLETE record whose result is empty reads as `absent`, not
+# unreadable, so the suppression must not depend on the checker's exit code
+# alone. Built as a fixture: a run that already recorded handle_mismatch would
+# take the recorded-state branch and prove nothing.
 new_case empty-result
-FAKE_BEHAVIOUR=replay run_fresheyes empty-result --foreground --claude --manual "Review calc.py."
-empty_base="$(current_base)" || fail "empty-result: no run artifacts"
-empty_handle="$(current_handle)"
+EMPTY_HANDLE="20260606-161616-aaaaac"
+empty_base="$CASE_DIR/logs/fresheyes-$EMPTY_HANDLE.log"
 : > "$empty_base"
 : > "$empty_base.result.md"
-run_progress empty-result-result --result "$empty_handle"
-assert_no_leak "empty result --result"
+printf 'provider noise\n%s: the loop kills a tmux session\nfake trailer\n' "$LEAK" > "$empty_base.stderr"
+cat > "$empty_base.status.json" <<JSON
+{"exit_code":0,"handle":"$EMPTY_HANDLE","heartbeat_at":1776000000.0,"launched_at":1776000000.0,"log_path":"$empty_base","mode":"manual","provider":"claude","result_path":"$empty_base","severity":"info","state":"complete","updated_at_epoch":1776000000.0,"verdict":"passed"}
+JSON
+printf '%s\n' "$empty_base" > "$CASE_DIR/logs/.locator.$EMPTY_HANDLE"
+run_progress empty-result-result --result "$EMPTY_HANDLE"
+assert_no_leak "a complete record with an empty result must not quote the provider's stderr"
 
 # (d) A refused result must not keep an authoritative verdict through the status
 # file — the jibot-code#f1vd lens: rejected output carries no verdict.
@@ -752,5 +758,58 @@ printf '%s\n' "$(current_base)" > "$CASE_DIR/logs/.locator.$suffix_tail"
 run_progress suffix-poll-result --result "$suffix_tail"
 assert_equals "$STATUS" "0" "polling with a handle suffix must not refuse a correct review"
 assert_contains "$(cat "$OUT_FILE")" "INDEPENDENT CODE REVIEW PASSED" "suffix poll delivers the review"
+
+# (g) Containment is on the RESOLVED path: a prefix test lets ../ through and a
+# plain -f follows a symlink out of the directory.
+new_case result-path-traversal
+for escape in traversal symlink; do
+  esc_handle="20260707-171717-aaaa0${escape:0:1}"
+  esc_base="$CASE_DIR/logs/fresheyes-$esc_handle.log"
+  printf 'SECRET-OUTSIDE-THE-LOG-DIR\n' > "$TEST_TMP/outside-$escape.txt"
+  printf '## Files Examined\n- calc.py\n\n**INDEPENDENT CODE REVIEW PASSED**\nFRESHEYES-RUN: %s\n' "$esc_handle" > "$esc_base"
+  if [ "$escape" = "traversal" ]; then
+    esc_target="$CASE_DIR/logs/../../outside-$escape.txt"
+    printf 'SECRET-OUTSIDE-THE-LOG-DIR\n' > "$TEST_TMP/outside-$escape.txt"
+  else
+    esc_target="$CASE_DIR/logs/link-$escape.md"
+    ln -sf "$TEST_TMP/outside-$escape.txt" "$esc_target"
+  fi
+  cat > "$esc_base.status.json" <<JSON
+{"exit_code":0,"handle":"$esc_handle","heartbeat_at":1777000000.0,"launched_at":1777000000.0,"log_path":"$esc_base","mode":"manual","provider":"claude","result_path":"$esc_target","severity":"info","state":"complete","updated_at_epoch":1777000000.0,"verdict":"passed"}
+JSON
+  printf '%s\n' "$esc_base" > "$CASE_DIR/logs/.locator.$esc_handle"
+  run_progress "result-path-$escape" --result "$esc_handle"
+  assert_not_contains "$(cat "$OUT_FILE")" "SECRET-OUTSIDE-THE-LOG-DIR" \
+    "a result_path escaping the log dir by $escape must not be printed as the review"
+done
+
+# (h) A record that names a DIFFERENT run must not have its own review verified
+# against its own claim: the expectation comes from the resolved file name.
+new_case foreign-identity-record
+IMPOSTOR_HANDLE="20260808-181818-aaaa0d"
+impostor_base="$CASE_DIR/logs/fresheyes-$IMPOSTOR_HANDLE.log"
+prior_review_text > "$impostor_base.result.md"
+printf 'transcript\n' > "$impostor_base"
+cat > "$impostor_base.status.json" <<JSON
+{"exit_code":0,"handle":"$PRIOR_HANDLE","heartbeat_at":1778000000.0,"launched_at":1778000000.0,"log_path":"$impostor_base","mode":"manual","provider":"gpt","result_path":"$impostor_base.result.md","severity":"info","state":"complete","updated_at_epoch":1778000000.0,"verdict":"failed"}
+JSON
+printf '%s\n' "$impostor_base" > "$CASE_DIR/logs/.locator.$IMPOSTOR_HANDLE"
+run_progress foreign-identity --result "$IMPOSTOR_HANDLE"
+assert_no_leak "a record claiming another run's handle must not verify its review against that claim"
+assert_equals "$STATUS" "6" "foreign-identity record exit status"
+
+# (i) A record with NO handle field, beside a result carrying another run's
+# marker, must still be checked — verification may not be gated on metadata.
+new_case no-handle-field
+NOHANDLE_HANDLE="20260909-191919-aaaa0e"
+nohandle_base="$CASE_DIR/logs/fresheyes-$NOHANDLE_HANDLE.log"
+prior_review_text > "$nohandle_base"
+cat > "$nohandle_base.status.json" <<JSON
+{"exit_code":0,"heartbeat_at":1779000000.0,"launched_at":1779000000.0,"log_path":"$nohandle_base","mode":"manual","provider":"claude","severity":"info","state":"complete","updated_at_epoch":1779000000.0,"verdict":"failed"}
+JSON
+printf '%s\n' "$nohandle_base" > "$CASE_DIR/logs/.locator.$NOHANDLE_HANDLE"
+run_progress no-handle-field --result "$NOHANDLE_HANDLE"
+assert_no_leak "a record with no handle field must still be checked"
+assert_equals "$STATUS" "6" "no-handle-field record exit status"
 
 printf 'fresheyes-handle-binding tests passed\n'

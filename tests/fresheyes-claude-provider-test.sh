@@ -223,7 +223,7 @@ PYHANDLE
 
 assert_automatic_output_json() {
   local json_file="$1"
-  "$PYTHON" - "$json_file" <<'PY'
+  "$PYTHON" - "$json_file" "${2:-}" <<'PY'
 import json
 import sys
 
@@ -235,7 +235,10 @@ if data.get("approve_commit") is not True or data.get("issues") != []:
 run_handle = data.get("run_handle")
 if not isinstance(run_handle, str) or not run_handle:
     raise SystemExit(f"automatic output carries no run_handle: {data!r}")
-if len(sys.argv) > 2 and sys.argv[2] and run_handle != sys.argv[2]:
+expected = sys.argv[2] if len(sys.argv) > 2 else ""
+if not expected:
+    raise SystemExit("no expected run handle was passed: the comparison would not run")
+if run_handle != expected:
     raise SystemExit(f"automatic output carries another run's handle: {run_handle!r}")
 PY
 }

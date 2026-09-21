@@ -74,6 +74,19 @@ _related_file_exists() {
   [[ -f "$base" || -f "$base.events.jsonl" || -f "$base.stream.jsonl" || -f "$base.stderr" ]]
 }
 
+# The run handle a log file's name carries: fresheyes-<handle>.log. Returns
+# non-zero for a name that does not have one (a legacy fresheyes-test-<pid>.log
+# fixture, say), which leaves the caller to fall back.
+_handle_from_base() {
+  local base="$1"
+  local name="${base##*/}"
+  if [[ "$name" =~ ^fresheyes-([0-9]{8}-[0-9]{6}-[0-9a-f]{6})\.log$ ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  return 1
+}
+
 _pid_from_base() {
   local base="$1"
   local name="${base##*/}"
@@ -289,17 +302,51 @@ line_count_or_zero() {
 # result_path that will not read is NOT silently replaced by the transcript —
 # the transcript is tee'd provider stdout and holds whatever the reviewer read,
 # including other runs' reviews.
+# Containment for a recorded result_path, checked on the RESOLVED path. A
+# string-prefix test lets `<log dir>/../outside` through, and a plain -f follows
+# a symlink pointing out of the directory; realpath closes both, and resolving
+# the log dirs too keeps /tmp -> /private/tmp (macOS) working.
+_result_path_allowed() {
+  python3 - "$1" "$LOG_DIR" "$GLOBAL_LOG_DIR" <<'PYPATH'
+import os
+import sys
+
+target = sys.argv[1]
+try:
+    real = os.path.realpath(target)
+except OSError:
+    raise SystemExit(1)
+for candidate in sys.argv[2:]:
+    if not candidate:
+        continue
+    try:
+        root = os.path.realpath(candidate)
+    except OSError:
+        continue
+    if real.startswith(root.rstrip(os.sep) + os.sep):
+        raise SystemExit(0)
+raise SystemExit(1)
+PYPATH
+}
+
+# Prints the file that IS the run's result. Return codes matter to the callers:
+#   0  a usable result
+#   1  the record names a result that is not there
+#   2  the record names one that is not allowed (outside the log directories)
+# 1 and 2 must NOT fall back to the transcript: it is tee'd provider stdout and
+# holds whatever the reviewer read, which on a replay is another run's review.
 resolve_result_file() {
   local base="$1"
   local recorded
   recorded=$(status_file_field "$base" "result_path" 2>/dev/null || true)
-  # status.json lives in a world-writable shared directory by default
-  # (/tmp/fresheyes-logs), so a recorded path is untrusted input — the same
-  # reason _tracker_target_allowed confines tracker targets. Without this, a
-  # record naming any readable file would make --result print that file as
-  # "the review". Confine it to the log directories and require a regular file.
-  if [[ -n "$recorded" ]] && _tracker_target_allowed "$LOG_DIR" "$recorded" && [[ -f "$recorded" ]]; then
+  if [[ -n "$recorded" ]]; then
     printf '%s\n' "$recorded"
+    if ! _result_path_allowed "$recorded"; then
+      return 2
+    fi
+    if [[ ! -f "$recorded" ]]; then
+      return 1
+    fi
     return 0
   fi
   local provider mode
@@ -317,14 +364,14 @@ detect_manual_verdict() {
   local review_file
   # One selection site, with no fallback to the transcript: a verdict read from
   # provider stdout is a verdict from whatever the reviewer happened to read.
-  review_file=$(resolve_result_file "$base")
+  review_file=$(resolve_result_file "$base") || return 1
   python3 "$VERDICT_PARSER" "$review_file" 2>/dev/null
 }
 
 print_final_review_if_nonempty() {
   local base="$1"
   local review_file
-  review_file=$(resolve_result_file "$base")
+  review_file=$(resolve_result_file "$base") || return 1
   if [[ -s "$review_file" ]]; then
     cat "$review_file"
     return 0
@@ -726,19 +773,20 @@ STATUS_VERDICT=$(status_file_field "$LOG_FILE" "verdict" 2>/dev/null || true)
 STATUS_EXIT_CODE=$(status_file_field "$LOG_FILE" "exit_code" 2>/dev/null || true)
 STATUS_HANDLE=$(status_file_field "$LOG_FILE" "handle" 2>/dev/null || true)
 STATUS_RESULT_HANDLE=$(status_file_field "$LOG_FILE" "result_handle" 2>/dev/null || true)
-# The expectation is the run's own minted handle when the record carries one,
-# and the caller's handle otherwise. It is NOT simply "$PID": a handle resolves
-# through the glob fallback in _find_base_for_pid_in_dir, which matches
-# fresheyes-*-<pid>.log, so the caller can legitimately poll with a SUFFIX of
-# the real handle — and comparing the result's marker against that suffix would
-# accuse a perfectly good review of being someone else's.
-# What this script declines to trust from status.json is the STATE and the
-# VERDICT; those it re-derives by reading the result itself. Trusting the
-# recorded identity for the comparison costs nothing a writer of that file does
-# not already have: anyone who can forge `handle` can forge the result beside it.
-EXPECTED_HANDLE="$STATUS_HANDLE"
+# The expectation comes from the run's own FILE NAME, which the tracker
+# resolution already confined to the log directories — not from status.json,
+# whose contents a record's writer chooses, and not from "$PID" alone, because
+# the glob in _find_base_for_pid_in_dir matches fresheyes-*-<pid>.log and a
+# caller may legitimately poll with a SUFFIX of the real handle. Taking it from
+# the metadata would let a record name a different run and verify its review
+# against itself; taking it from "$PID" would accuse a correct review polled by
+# suffix. The file name is neither.
+EXPECTED_HANDLE="$(_handle_from_base "$LOG_FILE" 2>/dev/null || true)"
 if [[ -z "$EXPECTED_HANDLE" ]]; then
   EXPECTED_HANDLE="$PID"
+fi
+if [[ -z "$EXPECTED_HANDLE" ]]; then
+  EXPECTED_HANDLE="$STATUS_HANDLE"
 fi
 HANDLE_VERIFIED=""
 RESULT_HANDLE=""
@@ -758,7 +806,12 @@ WITHHOLD_STDERR=0
 verify_result_handle() {
   local base="$1"
   local review_file output status
-  review_file=$(resolve_result_file "$base")
+  if ! review_file=$(resolve_result_file "$base"); then
+    # The record names a result that is missing or not allowed: nothing to
+    # verify and nothing to deliver.
+    HANDLE_VERIFIED="false"
+    return 7
+  fi
   output="$(python3 "$HANDLE_PARSER" "$review_file" "$EXPECTED_HANDLE" 2>/dev/null)"
   status=$?
   case "$status" in
@@ -806,10 +859,14 @@ fi
 # status write failed leaves a stale `running` record, and the poller then
 # reports `died`: that path must withhold the provider's stderr too.
 _HANDLE_STATUS=""
-if [[ -n "$EXPECTED_HANDLE" && -n "$STATUS_HANDLE" ]]; then
+if [[ -n "$EXPECTED_HANDLE" ]]; then
   verify_result_handle "$LOG_FILE"
   _HANDLE_STATUS=$?
-  if [[ "$HANDLE_VERIFIED" != "true" ]]; then
+  # An unmarked result still delivers (that is the fail-open rule), but the
+  # provider's stderr is a second, unverifiable copy and stays withheld unless
+  # the result verified as this run's. A record with no `handle` at all is a
+  # pre-change run: nothing to withhold from, and its diagnostics are unchanged.
+  if [[ "$HANDLE_VERIFIED" != "true" && -n "$STATUS_HANDLE" ]]; then
     WITHHOLD_STDERR=1
   fi
 fi
