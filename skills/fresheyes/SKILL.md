@@ -49,6 +49,8 @@ Default to a **different model family** from yourself — model diversity improv
 - **You are neither** → use `--gpt`
 - **User explicitly requests a provider** → honor it (`--gpt` or `--claude`)
 
+GPT reviews default to **gpt-5.6-sol**. Use Astra only when the user explicitly requests it for that review, by setting `FRESHEYES_GPT_MODEL=gpt-6-astra` on that invocation. Do not escalate to Astra automatically or persist that override in an unattended workflow.
+
 The provider keyword controls which model runs the review. Do NOT include it in the scope text.
 
 If the model you chose throws an error, try another. If that also throws an error, stop and ask the user what to do. DO NOT CONTINUE IF YOU CANNOT FOLLOW THESE INSTRUCTIONS.

@@ -79,7 +79,7 @@ PROVIDER="${PROVIDER:-${FRESHEYES_PROVIDER:-gpt}}"
 
 case "$PROVIDER" in
   gpt)
-    MODEL="${FRESHEYES_GPT_MODEL:-${FRESHEYES_MODEL:-gpt-6-astra}}"
+    MODEL="${FRESHEYES_GPT_MODEL:-${FRESHEYES_MODEL:-gpt-5.6-sol}}"
     PROVIDER_LABEL="Codex"
     ;;
   claude)
