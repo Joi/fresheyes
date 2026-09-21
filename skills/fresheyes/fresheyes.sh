@@ -522,6 +522,10 @@ fi
 
 HEARTBEAT_PID=""
 FINAL_STATUS_WRITTEN="0"
+# Set by enforce_result_handle: 1 only when the result was checked and IS this
+# run's. The provider-failure branches consult it before printing anything that
+# came from the provider.
+HANDLE_CHECK_OK=0
 
 manual_verdict_from_log() {
   # The verdict is read from the file that IS the result — the same file the
@@ -563,6 +567,7 @@ enforce_result_handle() {
   local allow_unverified="${3:-0}"
   local output
   local status
+  HANDLE_CHECK_OK=0
   set +e
   output="$(check_result_handle "$review_file")"
   status=$?
@@ -570,6 +575,7 @@ enforce_result_handle() {
 
   case "$status" in
     0)
+      HANDLE_CHECK_OK=1
       return 0
       ;;
     6)
@@ -744,7 +750,14 @@ run_claude_manual() {
     cat "$LOG_FILE"
     log_event "error" "provider_failed" "Claude manual review failed."
     echo "Fresh Eyes: $PROVIDER_LABEL failed. See log: $LOG_FILE" >&2
-    [[ -s "$STDERR_LOG" ]] && cat "$STDERR_LOG" >&2
+    # Manual mode delivers an unverified review by design, but the provider's
+    # stderr is a second, unverifiable copy: quote it only when the result was
+    # checked and is this run's.
+    if [[ "$HANDLE_CHECK_OK" == "1" && -s "$STDERR_LOG" ]]; then
+      cat "$STDERR_LOG" >&2
+    elif [[ -s "$STDERR_LOG" ]]; then
+      echo "Provider stderr withheld (this result could not be tied to this run): $STDERR_LOG" >&2
+    fi
     exit 1
   fi
   cat "$LOG_FILE"
@@ -792,11 +805,18 @@ run_claude_automatic() {
   enforce_result_handle "$LOG_FILE" automatic 1
 
   if [[ "$status" -ne 0 ]]; then
-    cat "$LOG_FILE"
     log_event "error" "provider_failed" "Claude automatic review failed."
     echo "Fresh Eyes: $PROVIDER_LABEL failed. Commit blocked." >&2
     echo "Full log: $LOG_FILE" >&2
-    [[ -s "$STDERR_LOG" ]] && cat "$STDERR_LOG" >&2
+    if [[ "$HANDLE_CHECK_OK" == "1" ]]; then
+      cat "$LOG_FILE"
+      [[ -s "$STDERR_LOG" ]] && cat "$STDERR_LOG" >&2
+    else
+      # The provider failed AND its output could not be tied to this run: the
+      # text is withheld rather than printed as a diagnostic. The commit is
+      # blocked either way.
+      echo "The provider's output could not be tied to this run, so it was withheld; see the log above." >&2
+    fi
     exit 1
   fi
   log_event "info" "provider_finished" "Claude automatic review finished."

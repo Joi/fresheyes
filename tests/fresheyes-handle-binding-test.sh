@@ -653,4 +653,69 @@ run_capture env-handle-ignored env \
 assert_equals "$STATUS" "0" "an un-daemonized run with identity variables set"
 current_base >/dev/null || fail "an un-daemonized run did not mint its own handle"
 
+# --- Error paths: a refusal must not hand the text back sideways -------------
+# Each of these was a live leak before it was closed.
+
+# (a) The runner refused, but its terminal status write did not land, so the
+# record still says `running`. Once the heartbeat goes stale the poller reports
+# `died` — and that diagnostic must withhold the provider's stderr too.
+new_case died-after-refusal
+FAKE_BEHAVIOUR=replay run_fresheyes died-after-refusal --foreground --claude --manual "Review calc.py."
+assert_equals "$STATUS" "6" "died-after-refusal: the run refused"
+died_base="$(current_base)" || fail "died-after-refusal: no run artifacts"
+died_handle="$(current_handle)"
+# Simulate the failed terminal write: restore the pre-refusal record, stale.
+python3 - "$died_base.status.json" <<'PYSTATUS'
+import json, sys
+path = sys.argv[1]
+with open(path, encoding="utf-8") as fh:
+    record = json.load(fh)
+record["state"] = "running"
+record.pop("exit_code", None)
+record.pop("result_handle", None)
+record["heartbeat_at"] = 1.0
+record["launched_at"] = 1.0
+with open(path, "w", encoding="utf-8") as fh:
+    json.dump(record, fh, separators=(",", ":"), sort_keys=True)
+    fh.write("\n")
+PYSTATUS
+run_progress died-after-refusal-result --result "$died_handle"
+assert_no_leak "died-after-refusal --result"
+
+# (b) The checker is unavailable AND the provider fails: the automatic branch
+# must not print the unchecked result or the provider's stderr as a diagnostic.
+saved_runner2="$RUNNER_PATH"
+RUNNER_PATH="$NO_HELPER_DIR/fresheyes.sh"
+new_case no-helper-provider-failure
+FAKE_BEHAVIOUR=replay FAKE_EXIT=1 run_fresheyes no-helper-provider-failure --foreground --claude --automatic "Review the staged changes."
+assert_no_leak "automatic replay with no checker and a provider failure"
+[ "$STATUS" -ne 0 ] || fail "automatic run with no checker and a provider failure was approved"
+RUNNER_PATH="$saved_runner2"
+
+# (c) A recorded result that is EMPTY reads as `absent`, not unreadable: the
+# suppression must not depend on the checker's exit code alone.
+new_case empty-result
+FAKE_BEHAVIOUR=replay run_fresheyes empty-result --foreground --claude --manual "Review calc.py."
+empty_base="$(current_base)" || fail "empty-result: no run artifacts"
+empty_handle="$(current_handle)"
+: > "$empty_base"
+: > "$empty_base.result.md"
+run_progress empty-result-result --result "$empty_handle"
+assert_no_leak "empty result --result"
+
+# (d) A refused result must not keep an authoritative verdict through the status
+# file — the jibot-code#f1vd lens: rejected output carries no verdict.
+new_case refused-verdict
+REFUSED_HANDLE="20260404-131313-ffffff"
+refused_base="$CASE_DIR/logs/fresheyes-$REFUSED_HANDLE.log"
+prior_review_text > "$refused_base.result.md"
+printf 'transcript\n' > "$refused_base"
+cat > "$refused_base.status.json" <<JSON
+{"exit_code":0,"handle":"$REFUSED_HANDLE","heartbeat_at":1774000000.0,"launched_at":1774000000.0,"log_path":"$refused_base","mode":"manual","provider":"gpt","result_path":"$refused_base.result.md","severity":"info","state":"complete","updated_at_epoch":1774000000.0,"verdict":"passed"}
+JSON
+printf '%s\n' "$refused_base" > "$CASE_DIR/logs/.locator.$REFUSED_HANDLE"
+run_progress refused-verdict-json --json "$REFUSED_HANDLE"
+assert_contains "$(cat "$OUT_FILE")" '"state":"handle_mismatch"' "refused verdict state"
+assert_not_contains "$(cat "$OUT_FILE")" '"verdict"' "a refused result must carry no verdict"
+
 printf 'fresheyes-handle-binding tests passed\n'

@@ -489,7 +489,10 @@ if provider_events:
     record["provider_events"] = provider_events
 if last_provider_event:
     record["last_provider_event"] = last_provider_event
-if verdict:
+if state == "handle_mismatch":
+    # The result was refused: it must not carry a verdict, from either source.
+    record.pop("verdict", None)
+elif verdict:
     record["verdict"] = verdict
 elif isinstance(status_data.get("verdict"), str) and status_data["verdict"]:
     record["verdict"] = status_data["verdict"]
@@ -728,6 +731,10 @@ if [[ -z "$EXPECTED_HANDLE" ]]; then
 fi
 HANDLE_VERIFIED=""
 RESULT_HANDLE=""
+# The provider's .stderr can hold review text and can never be verified, so the
+# failure diagnostics quote it only for a run whose result IS verified as this
+# run's. A record with no `handle` was written before this check existed: its
+# result is delivered unverified by design, so its diagnostics are unchanged.
 WITHHOLD_STDERR=0
 
 # Ask the one home for the run marker whose review the resolved result is.
@@ -782,6 +789,21 @@ else
   VERDICT=$(detect_manual_verdict "$LOG_FILE" 2>/dev/null || true)
 fi
 
+# Verify ONCE, before the state machine, so every terminal state knows whether
+# this run's result is its own — not only `complete`. A refusal whose terminal
+# status write failed leaves a stale `running` record, and the poller then
+# reports `died`: that path must withhold the provider's stderr too.
+_HANDLE_STATUS=""
+if [[ -n "$EXPECTED_HANDLE" && -n "$STATUS_HANDLE" ]]; then
+  set +e
+  verify_result_handle "$LOG_FILE"
+  _HANDLE_STATUS=$?
+  set -e
+  if [[ "$HANDLE_VERIFIED" != "true" ]]; then
+    WITHHOLD_STDERR=1
+  fi
+fi
+
 MESSAGE=""
 STATE_EXIT_CODE=0
 _mismatch_message() {
@@ -800,34 +822,16 @@ if [[ "$STATUS_STATE" == "handle_mismatch" ]]; then
   MESSAGE=$(_mismatch_message "$STATUS_RESULT_HANDLE")
 elif [[ "$STATUS_STATE" == "complete" || -n "$VERDICT" ]]; then
   REVIEW_STATE="complete"
-  # Verify for ourselves, whatever status.json claims: the poller is what the
-  # caller trusts, and a status file written by another version, or by a racing
-  # writer, must not be able to talk it into printing a foreign review.
-  if [[ -n "$EXPECTED_HANDLE" ]]; then
-    set +e
-    verify_result_handle "$LOG_FILE"
-    _handle_status=$?
-    set -e
-    case "$_handle_status" in
-      0) : ;;
-      6)
-        REVIEW_STATE="handle_mismatch"
-        STATE_EXIT_CODE=6
-        VERDICT=""
-        WITHHOLD_STDERR=1
-        MESSAGE=$(_mismatch_message "$RESULT_HANDLE")
-        ;;
-      7)
-        # The checker ran and could not read the resolved result: there is no
-        # text to deliver, and the diagnostic that follows must not quote the
-        # provider's stderr in its place.
-        WITHHOLD_STDERR=1
-        ;;
-      *)
-        # No marker (1), or the checker could not run at all: deliver, unverified.
-        :
-        ;;
-    esac
+  # The verification above is this script's own, whatever status.json claims:
+  # the poller is what the caller trusts, and a status file written by another
+  # version, or by a racing writer, must not be able to talk it into printing a
+  # foreign review. A mismatch is the only outcome that refuses; no marker, an
+  # unreadable result and a checker that could not run all deliver unverified.
+  if [[ "$_HANDLE_STATUS" == "6" ]]; then
+    REVIEW_STATE="handle_mismatch"
+    STATE_EXIT_CODE=6
+    VERDICT=""
+    MESSAGE=$(_mismatch_message "$RESULT_HANDLE")
   fi
 elif [[ "$STATUS_STATE" == "launching" ]]; then
   if _owner_alive || _epoch_within "$LAUNCHED_AT" "$LAUNCH_GRACE_SECS"; then
@@ -877,7 +881,7 @@ if [[ "$OUTPUT_MODE" == "result" ]]; then
   fi
   if [[ "$REVIEW_STATE" == "killed_at_launch" || "$REVIEW_STATE" == "died" ]]; then
     printf '%s\n' "$MESSAGE"
-    print_failure_diagnostic "$LOG_FILE"
+    print_failure_diagnostic "$LOG_FILE" "$WITHHOLD_STDERR"
     exit "$STATE_EXIT_CODE"
   fi
   print_result_or_pending "$REVIEW_STATE" "$LOG_FILE"
@@ -899,7 +903,7 @@ fi
 
 if [[ "$REVIEW_STATE" == "killed_at_launch" || "$REVIEW_STATE" == "died" ]]; then
   printf '%s\n' "$MESSAGE"
-  print_failure_diagnostic "$LOG_FILE"
+  print_failure_diagnostic "$LOG_FILE" "$WITHHOLD_STDERR"
   exit "$STATE_EXIT_CODE"
 fi
 
