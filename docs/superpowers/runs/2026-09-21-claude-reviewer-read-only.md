@@ -1,6 +1,6 @@
 # Run: claude-reviewer-read-only
 Instruction: start at medium (dispatched, security-shaped; never light). Task: jibot-code#x48m — make the fresheyes Claude reviewer read-only in skills/fresheyes/fresheyes.sh per TASK-jibot-code#x48m.md. Repo is NOT repoman-managed; ending per docs/FLEET.md on origin/feat/fleet-snapshot (fix branch fix/claude-reviewer-read-only from upstream/main, upstream PR referencing danshapiro/fresheyes#10, --no-ff merge into feat/fleet-snapshot, tag fleet-2026.09.21.2). Independent review: installed fresheyes plugin with --gpt and FRESHEYES_GPT_MODEL=gpt-6-astra exported on that invocation only.
-Stage: done (pushed to feat/fleet-snapshot and tagged fleet-2026.09.21.2 right after this record commit; the kata close-out carries the hashes)
+Stage: done (feat/fleet-snapshot = 4c7613c, tagged fleet-2026.09.21.3 — `.2` was already taken by the macOS-suite work on 679cf5a, and a pushed tag is never moved; the text of tag .3 still says ".2" in FLEET.md, corrected in the commit after it)
 Rung: heavy (start-floor heavy: hard-trigger security-sensitive surface (permissions), BR1 REV1 NOV1 INT1 FC2 = 6; the brief asked for medium as the minimum and allows heavy on a security hard trigger). Floored-at-heavy-by-hard-trigger: yes. Fleet cap: 3 review rounds per phase, 8 fresheyes launches per run.
 Spec: docs/superpowers/specs/2026-09-21-claude-reviewer-read-only-design.md   Plan: docs/superpowers/plans/2026-09-21-claude-reviewer-read-only.md
 Agency project: 01a0c3f7-bfb5-7cf1-9a54-b2467c3dae13

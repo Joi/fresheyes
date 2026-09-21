@@ -62,7 +62,7 @@ integration branch; do not open a pull request from it as it stands.
 
 The Claude reviewer default is upstream's, `claude-fable-5-1`.
 
-Since `fleet-2026.09.21.2` the Claude reviewer runs read-only
+Since `fleet-2026.09.21.3` the Claude reviewer runs read-only
 (`fix/claude-reviewer-read-only`, upstream pull request 23): no bypass flag,
 only Bash/Read/Glob/Grep, only the four git read commands pre-approved, and no
 user settings, hooks, plugins, MCP servers or repo `CLAUDE.md` loaded. It needs
