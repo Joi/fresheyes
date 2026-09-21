@@ -62,6 +62,15 @@ integration branch; do not open a pull request from it as it stands.
 
 The Claude reviewer default is upstream's, `claude-fable-5-1`.
 
+Since `fleet-2026.09.21.2` the Claude reviewer runs read-only
+(`fix/claude-reviewer-read-only`, upstream pull request 23): no bypass flag,
+only Bash/Read/Glob/Grep, only the four git read commands pre-approved, and no
+user settings, hooks, plugins, MCP servers or repo `CLAUDE.md` loaded. It needs
+a logged-in CLI: `apiKeyHelper` or an `env` block in `settings.json` is ignored.
+Two limits remain, both in the spec under `docs/superpowers/specs/`: a managed
+policy file can grant Bash again, and a diff helper already defined in the
+machine's own git config still runs under a plain `git diff`.
+
 ## Making a fix
 
 ```bash
@@ -168,10 +177,24 @@ line rather than counting failures. An rc=1 with no `FAIL` line anywhere in
 the log means a command failed under `set -o pipefail` with its stderr
 discarded; re-run that file under `bash -x` to find it.
 
-The Linux result has still not been measured by us. macct has no container
-runtime and no Homebrew bash, so bash 5 semantics were not exercised there
-either, and a change that touches what these files cover is still run on
-Linux, where upstream develops them, before it is tagged.
+Linux was measured on 2026-09-21 (kata jibot-code#x48m): every file passes on
+Ubuntu 24.04, on unmodified `upstream/main` and on this branch. One file is
+flaky there: `fresheyes-detach-test.sh` fails at `crashed-at-launch exit code:
+got 0, want 3` in 2 of 11 runs on unmodified `upstream/main` too, so
+re-run it before reading a failure as a regression. macct has no container
+runtime; a throwaway Lima VM does the job, run against a named commit so the
+tree under test is not the working tree:
+
+```bash
+limactl start --name=fe-test --vm-type=vz --mount-none --tty=false template://ubuntu-24.04
+limactl shell fe-test mkdir -p /tmp/t
+git archive <commit> | limactl shell fe-test tar -x -C /tmp/t
+limactl shell fe-test bash -c 'cd /tmp/t && for t in tests/*.sh; do bash "$t" >/dev/null 2>&1 </dev/null; echo "$t rc=$?"; done'
+limactl delete -f fe-test
+```
+
+A change that touches what these files cover is still run on Linux, where
+upstream develops them, before it is tagged.
 
 ## Tagging
 
