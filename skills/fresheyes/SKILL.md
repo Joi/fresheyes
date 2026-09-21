@@ -115,7 +115,7 @@ The state table in Step 5 is authoritative. Acting on each of the seven states:
 - **`killed_at_launch`** → do what the `message` says: re-run the SAME launch command with `--foreground`, after making sure your harness/exec timeout for that call is longer than the review (5-30 min; request/configure at least 30 minutes).
 - **`died`** → relay the `message` — it leads with the log path as evidence. Optionally re-run with `--foreground` (same timeout requirement as above).
 - **`unknown_handle`** → re-check the handle against the receipt's `FRESHPID=` line; if the handle is right, its trackers were removed (e.g. /tmp cleanup) — relaunch from Step 4.
-- **`handle_mismatch`** → the result is not this run's review: it carries another run's marker, or it could not be tied to this run at all. `--result` refuses to print it. Do NOT go looking for the text in the log — the log holds exactly the text that was withheld, and it is not evidence about this run. Relaunch from Step 4, and tell the user the review was refused and why.
+- **`handle_mismatch`** → the result is not this run's review: it carries another run's marker, or it could not be tied to this run at all. `--result` refuses to print it and names the file that holds the withheld text. Do NOT go and read that file — it is exactly the text that was withheld, and it is not evidence about this run. Relaunch from Step 4, and tell the user the review was refused and why. Read the `message`: it distinguishes "carries review run X" (a replay) from "could not be tied to this run" (no marker, or the check could not be made), and only the first is an accusation.
 
 Do not kill a Fresh Eyes process. If it appears stuck, escalate to the user with evidence instead of stopping it. Evidence should include at least two consecutive `--json` snapshots showing unchanged `line_count`, unchanged `last_log_mtime_epoch`, unchanged `provider_events` when present, and the relevant `pid_state` / `owner_pid_state` values.
 
@@ -139,6 +139,11 @@ is still the review and is still returned, with `handle_verified: false`; a resu
 carrying a DIFFERENT run's marker is refused (`handle_mismatch`, exit 6). In automatic
 mode, which is a commit gate, a result that cannot be tied to the run blocks the commit;
 the escape hatch there is the hook's own, `git commit --no-verify`.
+
+One consequence worth knowing when Fresh Eyes reviews ITSELF, or any repository
+whose files contain `FRESHEYES-RUN:` lines: the last marker in the result wins, so a
+review that quotes one of those lines AFTER its own marker is refused as a replay.
+Put the run's own marker last, which is what the prompt asks for.
 
 ## Parallel reviews
 

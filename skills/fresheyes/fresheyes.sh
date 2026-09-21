@@ -585,7 +585,14 @@ enforce_result_handle() {
       FINAL_STATUS_WRITTEN="1"
       echo "Fresh Eyes: handle_mismatch — this result carries review run $foreign, not this run ($HANDLE)." >&2
       echo "It is another review's text, so it was NOT returned. Re-run the review." >&2
-      echo "The withheld text is in $LOG_FILE; it is not evidence about this run and must not be read back." >&2
+      # Name the file that actually holds the withheld text. In automatic mode
+      # that is the JSON result, not the transcript, and steering a reader away
+      # from the harmless file while leaving the other unnamed is worse than
+      # saying nothing.
+      echo "The withheld text is in $review_file; it is not evidence about this run and must not be read back." >&2
+      if [[ "$review_file" != "$LOG_FILE" ]]; then
+        echo "The run's transcript is $LOG_FILE, and it may quote the same text." >&2
+      fi
       exit 6
       ;;
   esac

@@ -203,6 +203,24 @@ if schema_idx + 1 >= len(argv) or "approve_commit" not in argv[schema_idx + 1]:
 PY
 }
 
+# The handle the runner minted for the latest run, read from the prompt it sent.
+expected_run_handle() {
+  "$PYTHON" - "$ARGV_FILE" <<'PYHANDLE'
+import json
+import re
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as fh:
+        argv = json.load(fh)
+except Exception:
+    print("")
+    raise SystemExit(0)
+found = re.search(r"FRESHEYES-RUN:\s*([A-Za-z0-9][A-Za-z0-9._-]*)", argv[-1] if argv else "")
+print(found.group(1) if found else "")
+PYHANDLE
+}
+
 assert_automatic_output_json() {
   local json_file="$1"
   "$PYTHON" - "$json_file" <<'PY'
@@ -278,7 +296,7 @@ test_automatic_claude_extracts_structured_output() {
   assert_automatic_argv
   assert_contains "$output" "Fresh Eyes: approved." "automatic Claude output"
   output_file=$(read_latest_file "$run_tmp" 'fresheyes-automatic-*.json')
-  assert_automatic_output_json "$output_file"
+  assert_automatic_output_json "$output_file" "$(expected_run_handle)"
   assert_contains "$(cat "$(read_latest_file "$run_tmp" 'fresheyes-*.log.status.json')")" '"state":"complete"' "automatic Claude status"
   assert_contains "$(cat "$(read_latest_file "$run_tmp" 'fresheyes-*.log.status.json')")" '"verdict":"approved"' "automatic Claude status"
 }

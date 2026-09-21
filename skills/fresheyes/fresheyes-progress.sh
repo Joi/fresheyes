@@ -293,7 +293,12 @@ resolve_result_file() {
   local base="$1"
   local recorded
   recorded=$(status_file_field "$base" "result_path" 2>/dev/null || true)
-  if [[ -n "$recorded" ]]; then
+  # status.json lives in a world-writable shared directory by default
+  # (/tmp/fresheyes-logs), so a recorded path is untrusted input — the same
+  # reason _tracker_target_allowed confines tracker targets. Without this, a
+  # record naming any readable file would make --result print that file as
+  # "the review". Confine it to the log directories and require a regular file.
+  if [[ -n "$recorded" ]] && _tracker_target_allowed "$LOG_DIR" "$recorded" && [[ -f "$recorded" ]]; then
     printf '%s\n' "$recorded"
     return 0
   fi
@@ -310,10 +315,9 @@ resolve_result_file() {
 detect_manual_verdict() {
   local base="$1"
   local review_file
+  # One selection site, with no fallback to the transcript: a verdict read from
+  # provider stdout is a verdict from whatever the reviewer happened to read.
   review_file=$(resolve_result_file "$base")
-  if [[ ! -s "$review_file" ]]; then
-    review_file="$base"
-  fi
   python3 "$VERDICT_PARSER" "$review_file" 2>/dev/null
 }
 
@@ -722,12 +726,19 @@ STATUS_VERDICT=$(status_file_field "$LOG_FILE" "verdict" 2>/dev/null || true)
 STATUS_EXIT_CODE=$(status_file_field "$LOG_FILE" "exit_code" 2>/dev/null || true)
 STATUS_HANDLE=$(status_file_field "$LOG_FILE" "handle" 2>/dev/null || true)
 STATUS_RESULT_HANDLE=$(status_file_field "$LOG_FILE" "result_handle" 2>/dev/null || true)
-# The expectation is the handle the CALLER polled with: it is what resolved the
-# tracker, and it does not come from the file this script declines to trust.
-# status.json's handle answers only the legacy no-handle invocation.
-EXPECTED_HANDLE="$PID"
+# The expectation is the run's own minted handle when the record carries one,
+# and the caller's handle otherwise. It is NOT simply "$PID": a handle resolves
+# through the glob fallback in _find_base_for_pid_in_dir, which matches
+# fresheyes-*-<pid>.log, so the caller can legitimately poll with a SUFFIX of
+# the real handle — and comparing the result's marker against that suffix would
+# accuse a perfectly good review of being someone else's.
+# What this script declines to trust from status.json is the STATE and the
+# VERDICT; those it re-derives by reading the result itself. Trusting the
+# recorded identity for the comparison costs nothing a writer of that file does
+# not already have: anyone who can forge `handle` can forge the result beside it.
+EXPECTED_HANDLE="$STATUS_HANDLE"
 if [[ -z "$EXPECTED_HANDLE" ]]; then
-  EXPECTED_HANDLE="$STATUS_HANDLE"
+  EXPECTED_HANDLE="$PID"
 fi
 HANDLE_VERIFIED=""
 RESULT_HANDLE=""
@@ -740,9 +751,10 @@ WITHHOLD_STDERR=0
 # Ask the one home for the run marker whose review the resolved result is.
 # Sets HANDLE_VERIFIED (true/false) and RESULT_HANDLE; returns the checker's
 # status. Never lets an unhandled exit take the poller down.
-# The caller wraps this in `set +e` … `set -e`: this function must not restore
-# errexit itself, or its own non-zero return would take the poller down before
-# the caller could read it.
+# This script does not run under errexit (it never enables it), so no set-flag
+# juggling is needed here — and none may be added: `set +e` … `set -e` around a
+# call would switch errexit ON for the rest of the run, breaking the paths that
+# let a command fail on purpose (print_claude_running_status, line_count_or_zero).
 verify_result_handle() {
   local base="$1"
   local review_file output status
@@ -795,10 +807,8 @@ fi
 # reports `died`: that path must withhold the provider's stderr too.
 _HANDLE_STATUS=""
 if [[ -n "$EXPECTED_HANDLE" && -n "$STATUS_HANDLE" ]]; then
-  set +e
   verify_result_handle "$LOG_FILE"
   _HANDLE_STATUS=$?
-  set -e
   if [[ "$HANDLE_VERIFIED" != "true" ]]; then
     WITHHOLD_STDERR=1
   fi
@@ -807,9 +817,19 @@ fi
 MESSAGE=""
 STATE_EXIT_CODE=0
 _mismatch_message() {
-  local foreign="${1:-another review run}"
-  printf 'handle_mismatch — this result carries review run %s, not %s. It is another review'"'"'s text, so it was not returned; re-run the review. The withheld text is in %s, which is not evidence about this run and must not be read back.' \
-    "$foreign" "${EXPECTED_HANDLE:-this run}" "$LOG_FILE"
+  local foreign="${1:-}"
+  local result_file
+  result_file=$(resolve_result_file "$LOG_FILE")
+  if [[ -n "$foreign" ]]; then
+    printf 'handle_mismatch — this result carries review run %s, not %s. It is another review'"'"'s text, so it was not returned; re-run the review. The withheld text is in %s, which is not evidence about this run and must not be read back.' \
+      "$foreign" "${EXPECTED_HANDLE:-this run}" "$result_file"
+  else
+    # No foreign marker: the result simply could not be tied to this run — the
+    # reviewer omitted the marker, or the check could not be made. Saying "it is
+    # another review's text" here would be a false accusation.
+    printf 'handle_mismatch — this result could not be tied to review run %s: it carries no run marker, or the marker could not be checked. It was not returned; re-run the review. The unverified text is in %s and is not evidence about this run.' \
+      "${EXPECTED_HANDLE:-this run}" "$result_file"
+  fi
 }
 if [[ "$STATUS_STATE" == "handle_mismatch" ]]; then
   # Recorded by the runner. This branch precedes the "failed" → died branch so

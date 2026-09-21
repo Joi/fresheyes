@@ -42,8 +42,10 @@ TAIL_BYTES = 64 * 1024
 # A structured (automatic-mode) result is small; anything larger is not one.
 JSON_MAX_BYTES = 1024 * 1024
 
+# Bounded: the captured token is echoed into diagnostics and into status.json,
+# and a replaying reviewer controls it. A handle is 22 characters.
 MARKER_RE = re.compile(
-    r"^[ \t]*FRESHEYES-RUN:[ \t]*([A-Za-z0-9][A-Za-z0-9._-]*)[ \t]*$",
+    r"^[ \t]*FRESHEYES-RUN:[ \t]*([A-Za-z0-9][A-Za-z0-9._-]{0,127})[ \t]*$",
     re.MULTILINE,
 )
 

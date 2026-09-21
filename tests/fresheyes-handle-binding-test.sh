@@ -13,6 +13,11 @@
 # to name the leak. "The caller's streams" means stdout AND stderr — both
 # Claude failure branches cat the provider's stderr.
 #
+# A run against unmodified upstream/main proves only the FIRST case: the file
+# aborts there. The later cases are RED on that base too — its poller returns the
+# foreign review with rc=0 — but this file does not demonstrate it; run a case on
+# its own against the base tree if you need that evidence.
+#
 # Portability: macOS bash 3.2 and BSD userland. No find -printf, no mapfile,
 # no ps -o sess=. `setsid` and `timeout` are required (Homebrew on macOS).
 set -euo pipefail
@@ -486,7 +491,7 @@ for provider in gpt claude; do
   new_case "automatic-$provider"
   FAKE_BEHAVIOUR=replay run_fresheyes "automatic-$provider" --foreground "--$provider" --automatic "Review the staged changes."
   assert_no_leak "automatic $provider replay"
-  [ "$STATUS" -ne 0 ] || fail "automatic $provider replay: the commit was not blocked"
+  assert_equals "$STATUS" "6" "automatic $provider replay exit status"
   assert_contains "$(cat "$ERR_FILE")" "handle_mismatch" "automatic $provider replay state name"
   auto_base="$(current_base)" || fail "automatic $provider replay: no run artifacts were written"
   assert_equals "$(status_field "$auto_base.status.json" state)" "handle_mismatch" \
@@ -498,13 +503,13 @@ done
 new_case automatic-claude-error
 FAKE_BEHAVIOUR=replay FAKE_IS_ERROR=1 run_fresheyes automatic-claude-error --foreground --claude --automatic "Review the staged changes."
 assert_no_leak "automatic Claude replay through the is_error branch"
-[ "$STATUS" -ne 0 ] || fail "automatic Claude is_error replay: the commit was not blocked"
+assert_equals "$STATUS" "6" "automatic Claude is_error replay exit status"
 
 # (c) Automatic mode fails CLOSED on a result it cannot verify; manual does not.
 for provider in gpt claude; do
   new_case "automatic-unmarked-$provider"
   FAKE_BEHAVIOUR=unmarked run_fresheyes "automatic-unmarked-$provider" --foreground "--$provider" --automatic "Review the staged changes."
-  [ "$STATUS" -ne 0 ] || fail "automatic $provider unmarked: an unverifiable result was approved"
+  assert_equals "$STATUS" "6" "automatic $provider unmarked exit status"
 done
 
 # --- 1.11  The poller checks for itself, with no runner involved ------------
@@ -610,7 +615,7 @@ assert_contains "$(cat "$OUT_FILE")" "INDEPENDENT CODE REVIEW PASSED" "manual ru
 for provider in gpt claude; do
   new_case "no-helper-automatic-$provider"
   FAKE_BEHAVIOUR=own run_fresheyes "no-helper-automatic-$provider" --foreground "--$provider" --automatic "Review the staged changes."
-  [ "$STATUS" -ne 0 ] || fail "automatic $provider with no checker approved an unverifiable result"
+  assert_equals "$STATUS" "6" "automatic $provider with no checker exit status"
 done
 
 RUNNER_PATH="$saved_runner"
@@ -717,5 +722,35 @@ printf '%s\n' "$refused_base" > "$CASE_DIR/logs/.locator.$REFUSED_HANDLE"
 run_progress refused-verdict-json --json "$REFUSED_HANDLE"
 assert_contains "$(cat "$OUT_FILE")" '"state":"handle_mismatch"' "refused verdict state"
 assert_not_contains "$(cat "$OUT_FILE")" '"verdict"' "a refused result must carry no verdict"
+
+# (e) status.json lives in a shared directory, so result_path is untrusted
+# input. A record naming a file outside the log dir must not make --result print
+# that file as "the review".
+new_case result-path-escape
+ESCAPE_HANDLE="20260505-151515-aaaaab"
+escape_base="$CASE_DIR/logs/fresheyes-$ESCAPE_HANDLE.log"
+printf 'SECRET-OUTSIDE-THE-LOG-DIR\n' > "$TEST_TMP/outside.txt"
+printf '## Files Examined\n- calc.py\n\n**INDEPENDENT CODE REVIEW PASSED**\nFRESHEYES-RUN: %s\n' "$ESCAPE_HANDLE" > "$escape_base"
+cat > "$escape_base.status.json" <<JSON
+{"exit_code":0,"handle":"$ESCAPE_HANDLE","heartbeat_at":1775000000.0,"launched_at":1775000000.0,"log_path":"$escape_base","mode":"manual","provider":"claude","result_path":"$TEST_TMP/outside.txt","severity":"info","state":"complete","updated_at_epoch":1775000000.0,"verdict":"passed"}
+JSON
+printf '%s\n' "$escape_base" > "$CASE_DIR/logs/.locator.$ESCAPE_HANDLE"
+run_progress result-path-escape --result "$ESCAPE_HANDLE"
+assert_not_contains "$(cat "$OUT_FILE")" "SECRET-OUTSIDE-THE-LOG-DIR" \
+  "a result_path outside the log dir must not be printed as the review"
+
+# (f) A handle resolves through a glob that matches a SUFFIX of it, so a caller
+# can legitimately poll with less than the full handle. That is a resolution
+# detail, not a replay: a correctly marked review must still be delivered, and
+# never accused of being someone else's.
+new_case suffix-poll
+FAKE_BEHAVIOUR=own run_fresheyes suffix-poll --foreground --gpt --manual "Review calc.py."
+assert_equals "$STATUS" "0" "suffix-poll: the run itself succeeded"
+suffix_handle="$(current_handle)" || fail "suffix-poll: no run artifacts"
+suffix_tail="${suffix_handle##*-}"
+printf '%s\n' "$(current_base)" > "$CASE_DIR/logs/.locator.$suffix_tail"
+run_progress suffix-poll-result --result "$suffix_tail"
+assert_equals "$STATUS" "0" "polling with a handle suffix must not refuse a correct review"
+assert_contains "$(cat "$OUT_FILE")" "INDEPENDENT CODE REVIEW PASSED" "suffix poll delivers the review"
 
 printf 'fresheyes-handle-binding tests passed\n'
