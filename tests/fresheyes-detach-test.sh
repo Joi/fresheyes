@@ -51,15 +51,21 @@ snapshot_dir() {
 import os
 import sys
 
+
+def reraise(error):
+    raise error
+
+
 root = sys.argv[1]
 rows = []
-for dirpath, dirnames, filenames in os.walk(root):
+# A tree this cannot read is a failed fingerprint, not a short one: an
+# ignored error would leave before and after agreeing about a subtree
+# neither of them looked at. os.walk swallows its errors unless onerror
+# raises, and lstat failures are left to propagate for the same reason.
+for dirpath, dirnames, filenames in os.walk(root, onerror=reraise):
     for name in dirnames + filenames:
         path = os.path.join(dirpath, name)
-        try:
-            info = os.lstat(path)
-        except OSError:
-            continue
+        info = os.lstat(path)
         rows.append("%s %d %r" % (path, info.st_size, info.st_mtime))
 for row in sorted(rows):
     print(row)
