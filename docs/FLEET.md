@@ -95,7 +95,7 @@ time.
 ```bash
 git fetch origin && git fetch upstream
 git push origin upstream/main:refs/heads/main           # fast-forward the mirror
-git switch -c integrate-upstream origin/feat/fleet-snapshot
+git switch -c integrate-upstream-YYYYMMDD origin/feat/fleet-snapshot    # dated: the name is used once
 git merge upstream/main
 # read the default-model line (next paragraph), run the tests, get a review, then:
 git push origin HEAD:refs/heads/feat/fleet-snapshot    # must be a fast-forward
@@ -107,11 +107,12 @@ confirm the GPT default is still `gpt-5.6-sol`. An upstream change to that line
 merges without a conflict only when it does not touch it, so a clean merge is
 not evidence.
 
-A fix branch is rebased onto the new `upstream/main` only when its pull request
-no longer applies there. Force-push it with `--force-with-lease`, then merge the
-rewritten head into the integration branch again: the rebase gave the commits
-new hashes, so without that second merge the branch reads as unmerged. The
-merge changes no files when the rebase changed none. The integration branch
+Rule 2 then applies: rebase each fix branch whose pull request is still open
+onto the new `upstream/main`, force-push it with `--force-with-lease`, and merge
+the rewritten head into the integration branch again. The rebase gave the
+commits new hashes, so without that second merge the branch reads as unmerged.
+The merge changes no files when the rebase changed none. A fix branch whose pull
+request Dan has merged or closed is left alone. The integration branch
 itself is never rebased or force-pushed, because tags and consumers point into
 it.
 
@@ -160,11 +161,15 @@ named for the day:
 ```bash
 git tag -a fleet-YYYY.MM.DD -m "<what changed since the previous tag>" origin/feat/fleet-snapshot
 git push origin fleet-YYYY.MM.DD
-git describe --tags --exact-match origin/feat/fleet-snapshot    # prints the tag, or fails
+# verify the tag that origin holds, by name, against the branch that origin holds:
+git fetch origin
+git ls-remote --tags origin 'refs/tags/fleet-YYYY.MM.DD^{}'    # the commit the pushed tag names
+git rev-parse origin/feat/fleet-snapshot                        # must be the same hash
 ```
 
-Without `--exact-match`, `git describe` succeeds on an untagged head by naming
-an older tag plus a distance.
+`git describe --tags origin/feat/fleet-snapshot` is not that check: it succeeds
+on an untagged head by naming an older tag plus a distance, and with
+`--exact-match` it accepts any local tag on the commit, pushed or not.
 
 A second tag on the same day takes a suffix: `fleet-YYYY.MM.DD.2`. A pushed tag
 is never moved. Push nothing to `danshapiro/fresheyes`: fix branches are pushed
