@@ -740,13 +740,14 @@ STATUS_RESULT_HANDLE=$(status_file_field "$LOG_FILE" "result_handle" 2>/dev/null
 #     _find_base_for_pid_in_dir, which matches fresheyes-*-<pid>.log, so a
 #     caller may legitimately poll with a SUFFIX of the real handle, and
 #     comparing a correct marker against that suffix accuses a good review.
-# So: the polled handle, widened to the resolved file's name ONLY when the name
-# ends in "-<polled handle>" — which is the glob's own rule, fresheyes-*-<pid>.log.
-# A bare string suffix would be broader than the glob and lets a repointed
-# locator through: the legacy handle 1234 is a suffix of ...-ab1234.
+# So: the polled handle, widened to the resolved file's name ONLY in the case the
+# glob creates — a legacy NUMERIC pid, matched as fresheyes-*-<pid>.log. Both
+# halves are needed: an unanchored suffix would let a repointed locator through
+# (1234 is a suffix of ...-ab1234), and allowing a non-numeric handle to widen
+# would reach past the one resolution path that can hand back a shortened name.
 BASE_HANDLE="$(_handle_from_base "$LOG_FILE")"
 EXPECTED_HANDLE="$PID"
-if [[ -n "$PID" && -n "$BASE_HANDLE" && "$BASE_HANDLE" != "$PID" && "$BASE_HANDLE" == *-"$PID" ]]; then
+if [[ -n "$PID" && "$PID" =~ ^[0-9]+$ && -n "$BASE_HANDLE" && "$BASE_HANDLE" != "$PID" && "$BASE_HANDLE" == *-"$PID" ]]; then
   EXPECTED_HANDLE="$BASE_HANDLE"
 fi
 if [[ -z "$EXPECTED_HANDLE" ]]; then
@@ -820,7 +821,14 @@ fi
 # status write failed leaves a stale `running` record, and the poller then
 # reports `died`: that path must withhold the provider's stderr too.
 _HANDLE_STATUS=""
-if [[ -n "$EXPECTED_HANDLE" ]]; then
+STATUS_MODE=$(status_file_field "$LOG_FILE" "mode" 2>/dev/null || true)
+if [[ -n "$EXPECTED_HANDLE" && "$STATUS_MODE" != "automatic" ]]; then
+  # Automatic mode is excluded deliberately. Its result is a JSON file the
+  # poller has no way to name, so the only file it could read is the run's
+  # transcript — tee'd provider stdout, which quotes whatever the reviewer read
+  # and would make a good run look like a replay. That mode is a synchronous
+  # commit gate whose own runner verifies the result before approving; the
+  # poller is not in its path.
   verify_result_handle "$LOG_FILE"
   _HANDLE_STATUS=$?
   # A DETECTED mismatch withholds whatever the metadata says: the provider's

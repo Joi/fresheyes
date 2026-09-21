@@ -138,7 +138,10 @@ result written before this check existed, and any run whose reviewer dropped the
 is still the review and is still returned, with `handle_verified: false`; a result
 carrying a DIFFERENT run's marker is refused (`handle_mismatch`, exit 6). In automatic
 mode, which is a commit gate, a result that cannot be tied to the run blocks the commit;
-the escape hatch there is the hook's own, `git commit --no-verify`.
+the escape hatch there is the hook's own, `git commit --no-verify`. The binding needs a
+handle to bind to, so it applies when you poll with the one from your receipt — a
+no-handle poll (the legacy compatibility form) has no caller identity to check against,
+and the automatic mode's result is checked by its own run rather than by this script.
 
 One consequence worth knowing when Fresh Eyes reviews ITSELF, or any repository
 whose files contain `FRESHEYES-RUN:` lines: in a TEXT review the last marker wins, so a

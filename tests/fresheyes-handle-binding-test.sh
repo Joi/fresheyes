@@ -686,6 +686,8 @@ with open(path, "w", encoding="utf-8") as fh:
 PYSTATUS
 run_progress died-after-refusal-result --result "$died_handle"
 assert_no_leak "died-after-refusal --result"
+assert_contains "$(cat "$OUT_FILE")" "must not be read back" \
+  "the died diagnostic must say the log is not evidence about this run"
 
 # (b) The checker is unavailable AND the provider fails: the automatic branch
 # must not print the unchecked result or the provider's stderr as a diagnostic.
@@ -729,19 +731,29 @@ run_progress refused-verdict-json --json "$REFUSED_HANDLE"
 assert_contains "$(cat "$OUT_FILE")" '"state":"handle_mismatch"' "refused verdict state"
 assert_not_contains "$(cat "$OUT_FILE")" '"verdict"' "a refused result must carry no verdict"
 
-# (f) A handle resolves through a glob that matches a SUFFIX of it, so a caller
-# can legitimately poll with less than the full handle. That is a resolution
-# detail, not a replay: a correctly marked review must still be delivered, and
-# never accused of being someone else's.
+# (f) The legacy glob resolves fresheyes-*-<numeric pid>.log, so a caller can
+# poll with just the pid and get a run whose file name is longer. That is a
+# resolution detail, not a replay: the review must still be delivered. No
+# locator here — the glob is the point.
 new_case suffix-poll
-FAKE_BEHAVIOUR=own run_fresheyes suffix-poll --foreground --gpt --manual "Review calc.py."
-assert_equals "$STATUS" "0" "suffix-poll: the run itself succeeded"
-suffix_handle="$(current_handle)" || fail "suffix-poll: no run artifacts"
-suffix_tail="${suffix_handle##*-}"
-printf '%s\n' "$(current_base)" > "$CASE_DIR/logs/.locator.$suffix_tail"
-run_progress suffix-poll-result --result "$suffix_tail"
-assert_equals "$STATUS" "0" "polling with a handle suffix must not refuse a correct review"
-assert_contains "$(cat "$OUT_FILE")" "INDEPENDENT CODE REVIEW PASSED" "suffix poll delivers the review"
+GLOB_PID="424242"
+glob_base="$CASE_DIR/logs/fresheyes-20260101-030303-$GLOB_PID.log"
+printf '%s\n' \
+  '## Files Examined' \
+  '- calc.py' \
+  '' \
+  '## Summary' \
+  'This run reviewed its own scope.' \
+  '' \
+  '---' \
+  '**INDEPENDENT CODE REVIEW PASSED**' \
+  "FRESHEYES-RUN: 20260101-030303-$GLOB_PID" > "$glob_base"
+cat > "$glob_base.status.json" <<JSON
+{"exit_code":0,"handle":"20260101-030303-$GLOB_PID","heartbeat_at":1781000000.0,"launched_at":1781000000.0,"log_path":"$glob_base","mode":"manual","provider":"claude","severity":"info","state":"complete","updated_at_epoch":1781000000.0,"verdict":"passed"}
+JSON
+run_progress suffix-poll-result --result "$GLOB_PID"
+assert_equals "$STATUS" "0" "a run resolved through the legacy glob must not be refused"
+assert_contains "$(cat "$OUT_FILE")" "INDEPENDENT CODE REVIEW PASSED" "glob-resolved run delivers its review"
 
 # (g) The poller makes its own selection: a status file that names some other
 # file as the result changes nothing. (An earlier revision let status.json name
@@ -757,7 +769,9 @@ JSON
 printf '%s\n' "$ignored_base" > "$CASE_DIR/logs/.locator.$IGNORED_HANDLE"
 run_progress result-path-ignored --result "$IGNORED_HANDLE"
 assert_not_contains "$(cat "$OUT_FILE")" "SECRET-OUTSIDE-THE-LOG-DIR" \
-  "a path named in status.json must not be printed as the review"
+  "a path named in status.json must not be printed as the review (stdout)"
+assert_not_contains "$(cat "$ERR_FILE")" "SECRET-OUTSIDE-THE-LOG-DIR" \
+  "a path named in status.json must not be printed as the review (stderr)"
 assert_contains "$(cat "$OUT_FILE")" "INDEPENDENT CODE REVIEW PASSED" \
   "the run's own result is delivered regardless of what status.json names"
 
