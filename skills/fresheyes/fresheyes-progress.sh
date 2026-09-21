@@ -74,17 +74,11 @@ _related_file_exists() {
   [[ -f "$base" || -f "$base.events.jsonl" || -f "$base.stream.jsonl" || -f "$base.stderr" ]]
 }
 
-# The run handle a log file's name carries: fresheyes-<handle>.log. Returns
-# non-zero for a name that does not have one (a legacy fresheyes-test-<pid>.log
-# fixture, say), which leaves the caller to fall back.
+# The run identity a log file's NAME carries: fresheyes-<handle>.log.
 _handle_from_base() {
-  local base="$1"
-  local name="${base##*/}"
-  if [[ "$name" =~ ^fresheyes-([0-9]{8}-[0-9]{6}-[0-9a-f]{6})\.log$ ]]; then
-    printf '%s\n' "${BASH_REMATCH[1]}"
-    return 0
-  fi
-  return 1
+  local name="${1##*/}"
+  name="${name#fresheyes-}"
+  printf '%s\n' "${name%.log}"
 }
 
 _pid_from_base() {
@@ -141,8 +135,15 @@ _died_message() {
   if [[ "$STATUS_STATE" == "failed" ]]; then
     recorded=" The runner recorded state=failed${STATUS_EXIT_CODE:+ (exit_code=$STATUS_EXIT_CODE)}."
   fi
-  printf 'review died before producing a verdict — inspect the log at %s for evidence.%s Last sign of life: %s. To retry synchronously, re-run the same command with --foreground.' \
-    "$base" "$recorded" "$died_human"
+  if [[ "${WITHHOLD_STDERR:-0}" == "1" ]]; then
+    # The log holds text that could not be tied to this run. Telling a reader to
+    # inspect it for evidence is the same leak as printing it.
+    printf 'review died before producing a verdict.%s Last sign of life: %s. The log at %s holds output that could not be tied to this run — it is not evidence about this run and must not be read back. To retry synchronously, re-run the same command with --foreground.' \
+      "$recorded" "$died_human" "$base"
+  else
+    printf 'review died before producing a verdict — inspect the log at %s for evidence.%s Last sign of life: %s. To retry synchronously, re-run the same command with --foreground.' \
+      "$base" "$recorded" "$died_human"
+  fi
 }
 
 _process_state() {
@@ -773,19 +774,26 @@ STATUS_VERDICT=$(status_file_field "$LOG_FILE" "verdict" 2>/dev/null || true)
 STATUS_EXIT_CODE=$(status_file_field "$LOG_FILE" "exit_code" 2>/dev/null || true)
 STATUS_HANDLE=$(status_file_field "$LOG_FILE" "handle" 2>/dev/null || true)
 STATUS_RESULT_HANDLE=$(status_file_field "$LOG_FILE" "result_handle" 2>/dev/null || true)
-# The expectation comes from the run's own FILE NAME, which the tracker
-# resolution already confined to the log directories — not from status.json,
-# whose contents a record's writer chooses, and not from "$PID" alone, because
-# the glob in _find_base_for_pid_in_dir matches fresheyes-*-<pid>.log and a
-# caller may legitimately poll with a SUFFIX of the real handle. Taking it from
-# the metadata would let a record name a different run and verify its review
-# against itself; taking it from "$PID" would accuse a correct review polled by
-# suffix. The file name is neither.
-EXPECTED_HANDLE="$(_handle_from_base "$LOG_FILE" 2>/dev/null || true)"
-if [[ -z "$EXPECTED_HANDLE" ]]; then
-  EXPECTED_HANDLE="$PID"
+# The expectation is the handle the CALLER polled with. Two things it must not
+# be, both learned by getting it wrong:
+#   - status.json's `handle`. Repointing .locator.<caller's handle> at ANOTHER
+#     run's genuine base — one line, in the same shared directory — then makes
+#     the poller read that run's handle, compare it with that run's own marker,
+#     and deliver its review as this one's. No text has to be forged.
+#   - "$PID" with no exception. A handle also resolves through the glob in
+#     _find_base_for_pid_in_dir, which matches fresheyes-*-<pid>.log, so a
+#     caller may legitimately poll with a SUFFIX of the real handle, and
+#     comparing a correct marker against that suffix accuses a good review.
+# So: the polled handle, widened to the resolved file's name ONLY when the
+# polled handle is a suffix of it, which is exactly the glob case.
+BASE_HANDLE="$(_handle_from_base "$LOG_FILE")"
+EXPECTED_HANDLE="$PID"
+if [[ -n "$PID" && -n "$BASE_HANDLE" && "$BASE_HANDLE" != "$PID" && "$BASE_HANDLE" == *"$PID" ]]; then
+  EXPECTED_HANDLE="$BASE_HANDLE"
 fi
 if [[ -z "$EXPECTED_HANDLE" ]]; then
+  # The legacy no-handle invocation has nothing else to go on. It only feeds
+  # the comparison; a record with no handle at all delivers unverified anyway.
   EXPECTED_HANDLE="$STATUS_HANDLE"
 fi
 HANDLE_VERIFIED=""

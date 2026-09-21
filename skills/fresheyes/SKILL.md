@@ -113,7 +113,7 @@ The state table in Step 5 is authoritative. Acting on each of the seven states:
 - **`complete` + `verdict=failed`** → the review completed and found blocking issues. Proceed to Step 7.
 - **`complete` with no `verdict`** → the review finished but emitted no PASSED/FAILED marker. This is **not** a tool failure. Run Step 7 (`--result`): it returns the review text when the log has content, or a failure diagnostic when it does not. Report exactly what `--result` returns.
 - **`killed_at_launch`** → do what the `message` says: re-run the SAME launch command with `--foreground`, after making sure your harness/exec timeout for that call is longer than the review (5-30 min; request/configure at least 30 minutes).
-- **`died`** → relay the `message` — it leads with the log path as evidence. Optionally re-run with `--foreground` (same timeout requirement as above).
+- **`died`** → relay the `message`. When the run's result could not be tied to this run, the message says so and names the log as text NOT to read back; otherwise it leads with the log path as evidence. Optionally re-run with `--foreground` (same timeout requirement as above).
 - **`unknown_handle`** → re-check the handle against the receipt's `FRESHPID=` line; if the handle is right, its trackers were removed (e.g. /tmp cleanup) — relaunch from Step 4.
 - **`handle_mismatch`** → the result is not this run's review: it carries another run's marker, or it could not be tied to this run at all. `--result` refuses to print it and names the file that holds the withheld text. Do NOT go and read that file — it is exactly the text that was withheld, and it is not evidence about this run. Relaunch from Step 4, and tell the user the review was refused and why. Read the `message`: it distinguishes "carries review run X" (a replay) from "could not be tied to this run" (no marker, or the check could not be made), and only the first is an accusation.
 
@@ -141,9 +141,11 @@ mode, which is a commit gate, a result that cannot be tied to the run blocks the
 the escape hatch there is the hook's own, `git commit --no-verify`.
 
 One consequence worth knowing when Fresh Eyes reviews ITSELF, or any repository
-whose files contain `FRESHEYES-RUN:` lines: the last marker in the result wins, so a
-review that quotes one of those lines AFTER its own marker is refused as a replay.
-Put the run's own marker last, which is what the prompt asks for.
+whose files contain `FRESHEYES-RUN:` lines: in a TEXT review the last marker wins, so a
+review that quotes one of those lines AFTER its own marker is refused as a replay. Put
+the run's own marker last, which is what the prompt asks for. An automatic-mode result
+is JSON and is read from its `run_handle` field, so quoting a marker there changes
+nothing.
 
 ## Parallel reviews
 

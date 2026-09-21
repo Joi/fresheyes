@@ -822,7 +822,7 @@ run_claude_automatic() {
       # The provider failed AND its output could not be tied to this run: the
       # text is withheld rather than printed as a diagnostic. The commit is
       # blocked either way.
-      echo "The provider's output could not be tied to this run, so it was withheld; see the log above." >&2
+      echo "The provider's output could not be tied to this run, so it was withheld. Its path is named above; it is not evidence about this run." >&2
     fi
     exit 1
   fi

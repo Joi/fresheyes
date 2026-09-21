@@ -812,4 +812,35 @@ run_progress no-handle-field --result "$NOHANDLE_HANDLE"
 assert_no_leak "a record with no handle field must still be checked"
 assert_equals "$STATUS" "6" "no-handle-field record exit status"
 
+# (j) The locator for THIS run's handle repointed at ANOTHER run's genuine
+# base. Everything involved is inside the log directory and nothing is forged,
+# so only the expected identity can refuse it: taking that from the record
+# would compare the other run's review against the other run's own handle and
+# deliver it.
+new_case locator-repoint
+OTHER_HANDLE="20261010-202020-aaaa0f"
+other_base="$CASE_DIR/logs/fresheyes-$OTHER_HANDLE.log"
+prior_review_text > "$other_base.result.md"
+printf 'transcript\n' > "$other_base"
+cat > "$other_base.status.json" <<JSON
+{"exit_code":0,"handle":"$OTHER_HANDLE","heartbeat_at":1780000000.0,"launched_at":1780000000.0,"log_path":"$other_base","mode":"manual","provider":"gpt","result_path":"$other_base.result.md","severity":"info","state":"complete","updated_at_epoch":1780000000.0,"verdict":"failed"}
+JSON
+# The other run's result carries the other run's own marker: genuine for it.
+python3 - "$other_base.result.md" "$OTHER_HANDLE" <<'PYMARK'
+import re
+import sys
+
+path, handle = sys.argv[1:3]
+with open(path, encoding="utf-8") as fh:
+    text = fh.read()
+text = re.sub(r"FRESHEYES-RUN: .*", "FRESHEYES-RUN: %s" % handle, text)
+with open(path, "w", encoding="utf-8") as fh:
+    fh.write(text)
+PYMARK
+CALLER_HANDLE="20261010-212121-aaaa10"
+printf '%s\n' "$other_base" > "$CASE_DIR/logs/.locator.$CALLER_HANDLE"
+run_progress locator-repoint --result "$CALLER_HANDLE"
+assert_no_leak "a locator repointed at another run must not deliver that run's review"
+assert_equals "$STATUS" "6" "locator repoint exit status"
+
 printf 'fresheyes-handle-binding tests passed\n'
