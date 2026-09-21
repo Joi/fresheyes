@@ -253,7 +253,16 @@ mint_handle() {
   printf '%s-%s\n' "$(date +%Y%m%d-%H%M%S)" "$suffix"
 }
 
-if [[ -n "${FRESHEYES_HANDLE:-}" && -n "${FRESHEYES_LOG_FILE:-}" ]]; then
+# Identity arrives from the environment ONLY for a detached child, which always
+# sets FRESHEYES_DAEMONIZED=1 (both launch paths do). The handle now names a
+# file and decides an equality test, so an ambient FRESHEYES_HANDLE must not be
+# able to take either over: adopt it only for that child, and only in the shape
+# mint_handle produces.
+if [[ "${FRESHEYES_DAEMONIZED:-0}" == "1" && -n "${FRESHEYES_HANDLE:-}" && -n "${FRESHEYES_LOG_FILE:-}" ]]; then
+  if [[ ! "$FRESHEYES_HANDLE" =~ ^[0-9]{8}-[0-9]{6}-[0-9a-f]{6}$ ]]; then
+    echo "Error: FRESHEYES_HANDLE is not a Fresh Eyes run handle: $FRESHEYES_HANDLE" >&2
+    exit 1
+  fi
   # Detached child: identity was minted by the parent and arrives via env.
   HANDLE="$FRESHEYES_HANDLE"
   LOG_FILE="$FRESHEYES_LOG_FILE"
@@ -268,6 +277,19 @@ STREAM_LOG="$LOG_FILE.stream.jsonl"
 STDERR_LOG="$LOG_FILE.stderr"
 STATUS_FILE="$LOG_FILE.status.json"
 LAUNCH_STDERR="$LOG_FILE.launch.stderr"
+# The file that IS this run's result, as opposed to its transcript. Computed
+# here, with the other paths, because status.json records it and the first
+# status write happens before any provider runs (`set -u` would kill the run on
+# an unset variable). Automatic mode's output is named for the handle for the
+# same reason every other artifact is: so it belongs to this run.
+if [[ "$MODE" == "automatic" ]]; then
+  RESULT_PATH="$LOG_DIR/fresheyes-automatic-$HANDLE.json"
+elif [[ "$PROVIDER" == "gpt" ]]; then
+  RESULT_PATH="$RESULT_FILE"
+else
+  RESULT_PATH="$LOG_FILE"
+fi
+HANDLE_PARSER="$SCRIPT_DIR/fresheyes-handle.py"
 # The detached child must record the parent's ACTUAL detach method:
 # write_status overwrites detach_method on every write, so a child that
 # hardcoded "setsid" would clobber a systemd-run launch's method on its
@@ -296,13 +318,18 @@ write_status() {
   local state="$1"
   local exit_code="${2:-}"
   local verdict="${3:-}"
+  # The foreign handle, written only when this run refuses a result: the poller
+  # must be able to name both handles even when the result artifact is not there
+  # to re-read (the Claude automatic is_error path never writes one).
+  local result_handle="${4:-}"
   python3 - "$STATUS_FILE" "$state" "$PROVIDER" "$MODE" "$LOG_FILE" \
     "$exit_code" "$verdict" "${OWNER_PID:-}" "${LAUNCHED_AT_EPOCH:-}" \
-    "${DETACH_METHOD:-}" <<'PY'
+    "${DETACH_METHOD:-}" "$HANDLE" "${RESULT_PATH:-}" "$result_handle" <<'PY'
 import json, os, sys, time
 
 (path, state, provider, mode, log_path,
- exit_code, verdict, owner_pid, launched_at, detach_method) = sys.argv[1:11]
+ exit_code, verdict, owner_pid, launched_at, detach_method,
+ run_handle, result_path, result_handle) = sys.argv[1:14]
 
 record = {}
 if os.path.exists(path):
@@ -312,7 +339,7 @@ if os.path.exists(path):
     except Exception:
         record = {}
 
-record["severity"] = "error" if state == "failed" else "info"
+record["severity"] = "error" if state in ("failed", "handle_mismatch") else "info"
 record["state"] = state
 record["provider"] = provider
 record["mode"] = mode
@@ -331,6 +358,12 @@ if launched_at:
     record.setdefault("launched_at", float(launched_at))
 if detach_method:
     record["detach_method"] = detach_method
+if run_handle:
+    record["handle"] = run_handle
+if result_path:
+    record["result_path"] = result_path
+if result_handle:
+    record["result_handle"] = result_handle
 
 tmp_path = f"{path}.tmp.{os.getpid()}"
 with open(tmp_path, "w", encoding="utf-8") as handle:
@@ -468,8 +501,9 @@ fi
 PROMPT=$(python3 -c "
 import sys
 template = open(sys.argv[1]).read()
-print(template.replace('{{REVIEW_SCOPE}}', sys.argv[2]))
-" "$PROMPT_FILE" "$SCOPE_TEXT")
+template = template.replace('{{REVIEW_SCOPE}}', sys.argv[2])
+print(template.replace('{{RUN_HANDLE}}', sys.argv[3]))
+" "$PROMPT_FILE" "$SCOPE_TEXT" "$HANDLE")
 
 if [[ "$PROVIDER" == "claude" ]]; then
   : > "$LOG_FILE"
@@ -490,12 +524,86 @@ HEARTBEAT_PID=""
 FINAL_STATUS_WRITTEN="0"
 
 manual_verdict_from_log() {
+  # The verdict is read from the file that IS the result — the same file the
+  # handle check and the caller's output use. One selection, not three.
   local review_file="$LOG_FILE"
-  if [[ "$PROVIDER" == "gpt" && -s "$RESULT_FILE" ]]; then
-    review_file="$RESULT_FILE"
+  if [[ -s "$RESULT_PATH" ]]; then
+    review_file="$RESULT_PATH"
   fi
   # Shared with fresheyes-progress.sh: the one home for the verdict marker.
   python3 "$SCRIPT_DIR/fresheyes-verdict.py" "$review_file" 2>/dev/null
+}
+
+# Ask the one home for the run marker whose review this file is.
+# Echoes the checker's word; returns its status. Callers MUST capture the
+# status explicitly — an unhandled exit would kill the run under `set -e` and
+# throw away a review that had already succeeded.
+check_result_handle() {
+  local review_file="$1"
+  local output
+  local status
+  set +e
+  output="$(python3 "$HANDLE_PARSER" "$review_file" "$HANDLE" 2>/dev/null)"
+  status=$?
+  set -e
+  printf '%s\n' "$output"
+  return "$status"
+}
+
+# Refuse a result that belongs to another run, before any of it is delivered.
+# Manual mode fails OPEN when the check cannot be made; automatic mode, which
+# is a commit gate, fails CLOSED.
+#   enforce_result_handle <file> <manual|automatic> [allow_unverified]
+# With allow_unverified=1 only a mismatch refuses: the caller has a provider
+# failure of its own to report and its diagnostic is worth more than a
+# could-not-verify message.
+enforce_result_handle() {
+  local review_file="$1"
+  local mode="$2"
+  local allow_unverified="${3:-0}"
+  local output
+  local status
+  set +e
+  output="$(check_result_handle "$review_file")"
+  status=$?
+  set -e
+
+  case "$status" in
+    0)
+      return 0
+      ;;
+    6)
+      local foreign="${output#mismatch }"
+      _stop_heartbeat
+      write_status "handle_mismatch" "6" "" "$foreign" || true
+      FINAL_STATUS_WRITTEN="1"
+      echo "Fresh Eyes: handle_mismatch — this result carries review run $foreign, not this run ($HANDLE)." >&2
+      echo "It is another review's text, so it was NOT returned. Re-run the review." >&2
+      echo "The withheld text is in $LOG_FILE; it is not evidence about this run and must not be read back." >&2
+      exit 6
+      ;;
+  esac
+
+  # Everything else: no marker (1), the result could not be read (7), or the
+  # checker could not run at all (any other status — a missing python3 or a
+  # partially-synced skill directory, where python itself exits 2).
+  local why="carries no run marker"
+  if [[ "$status" == "7" ]]; then
+    why="could not be read"
+  elif [[ "$status" != "1" ]]; then
+    why="could not be checked (the run-marker checker did not run)"
+  fi
+
+  if [[ "$mode" == "automatic" && "$allow_unverified" != "1" ]]; then
+    _stop_heartbeat
+    write_status "handle_mismatch" "6" "" "" || true
+    FINAL_STATUS_WRITTEN="1"
+    echo "Fresh Eyes: handle_mismatch — this result $why, so it cannot be tied to this run ($HANDLE). Commit blocked." >&2
+    exit 6
+  fi
+
+  echo "Fresh Eyes: this result $why — it is delivered unverified (handle_verified=false)." >&2
+  return 0
 }
 
 _cleanup() {
@@ -563,7 +671,7 @@ CLAUDE_TOOLS='Bash(git diff:*,git show:*,git log:*,git status:*),Read,Glob,Grep'
 CLAUDE_STREAM_PARSER="$SCRIPT_DIR/fresheyes-claude-stream.py"
 
 run_gpt_manual() {
-  if ! "$CODEX_BIN" exec \
+  if ! env -u FRESHEYES_HANDLE -u FRESHEYES_LOG_FILE "$CODEX_BIN" exec \
     --sandbox read-only \
     --color never \
     --model "$MODEL" \
@@ -578,13 +686,15 @@ run_gpt_manual() {
     echo "Fresh Eyes: $PROVIDER_LABEL produced no final review. See log: $LOG_FILE" >&2
     exit 1
   fi
+  # Before the review is delivered, not after.
+  enforce_result_handle "$RESULT_FILE" manual
   cat "$RESULT_FILE"
 }
 
 run_gpt_automatic() {
   local output_file="$1"
   # Codex writes schema-conforming JSON directly to the output file — no post-processing needed.
-  if ! "$CODEX_BIN" exec \
+  if ! env -u FRESHEYES_HANDLE -u FRESHEYES_LOG_FILE "$CODEX_BIN" exec \
     --sandbox read-only \
     --color never \
     --model "$MODEL" \
@@ -600,8 +710,17 @@ run_gpt_automatic() {
 }
 
 run_claude_manual() {
+  local status
   log_event "info" "provider_started" "Claude manual review started."
-  if ! env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_ENTRYPOINT "$CLAUDE_BIN" -p \
+  # The parser prints the review once, at the end, and writes the same text to
+  # --review-log on every branch. Its stdout is discarded and the review is
+  # delivered from the log AFTER the check — the script runs under
+  # `set -o pipefail`, so a provider that emits a good result and then exits
+  # non-zero would otherwise take the failure branch with the whole review
+  # already printed.
+  set +e
+  env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_ENTRYPOINT \
+    -u FRESHEYES_HANDLE -u FRESHEYES_LOG_FILE "$CLAUDE_BIN" -p \
     --model "$MODEL" \
     --effort "$REASONING_EFFORT" \
     --output-format stream-json \
@@ -615,12 +734,20 @@ run_claude_manual() {
       --mode manual \
       --review-log "$LOG_FILE" \
       --event-log "$EVENT_LOG" \
-      --stream-log "$STREAM_LOG"; then
+      --stream-log "$STREAM_LOG" > /dev/null
+  status=$?
+  set -e
+
+  enforce_result_handle "$LOG_FILE" manual
+
+  if [[ "$status" -ne 0 ]]; then
+    cat "$LOG_FILE"
     log_event "error" "provider_failed" "Claude manual review failed."
     echo "Fresh Eyes: $PROVIDER_LABEL failed. See log: $LOG_FILE" >&2
     [[ -s "$STDERR_LOG" ]] && cat "$STDERR_LOG" >&2
     exit 1
   fi
+  cat "$LOG_FILE"
   log_event "info" "provider_finished" "Claude manual review finished."
 }
 
@@ -630,8 +757,19 @@ run_claude_automatic() {
   local json_schema
   json_schema=$(cat "$SCHEMA_FILE")
 
+  local status
   log_event "info" "provider_started" "Claude automatic review started."
-  if ! env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_ENTRYPOINT "$CLAUDE_BIN" -p \
+  # Same deferral as the manual path, and for a sharper reason: the parser
+  # handles an is_error event before structured output exists at all, printing
+  # the provider's text and returning 1 — so the check has to precede the
+  # failure branch. Only a MISMATCH may preempt that branch, though: the
+  # parser also writes unmarked failure text to the review log on
+  # missing_result and structured_output_missing, and refusing there for a
+  # missing marker would report every API error, rate limit and auth failure as
+  # a handle failure and throw away the diagnostic that says what went wrong.
+  set +e
+  env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_ENTRYPOINT \
+    -u FRESHEYES_HANDLE -u FRESHEYES_LOG_FILE "$CLAUDE_BIN" -p \
     --model "$MODEL" \
     --effort "$REASONING_EFFORT" \
     --output-format stream-json \
@@ -647,7 +785,14 @@ run_claude_automatic() {
       --review-log "$LOG_FILE" \
       --event-log "$EVENT_LOG" \
       --stream-log "$STREAM_LOG" \
-      --automatic-output "$output_file"; then
+      --automatic-output "$output_file" > /dev/null
+  status=$?
+  set -e
+
+  enforce_result_handle "$LOG_FILE" automatic 1
+
+  if [[ "$status" -ne 0 ]]; then
+    cat "$LOG_FILE"
     log_event "error" "provider_failed" "Claude automatic review failed."
     echo "Fresh Eyes: $PROVIDER_LABEL failed. Commit blocked." >&2
     echo "Full log: $LOG_FILE" >&2
@@ -673,7 +818,7 @@ except Exception:
 # an already-forked python can commit a whole stale record AFTER the terminal
 # write, resurrecting state=running (later misread as died). Never write over
 # a terminal state.
-if record.get("state") in ("complete", "failed"):
+if record.get("state") in ("complete", "failed", "handle_mismatch"):
     sys.exit(0)
 record["heartbeat_at"] = time.time()
 tmp_path = f"{path}.tmp.hb.{os.getpid()}"
@@ -710,7 +855,9 @@ _stop_heartbeat() {
 _start_heartbeat
 
 if [[ "$MODE" == "automatic" ]]; then
-  OUTPUT_FILE="$LOG_DIR/fresheyes-automatic-$(date +%Y%m%d-%H%M%S)-$$.json"
+  # Named for the handle, like every other artifact of this run, so the poller
+  # can find the file that IS the result.
+  OUTPUT_FILE="$RESULT_PATH"
 
   case "$PROVIDER" in
     gpt)    run_gpt_automatic "$OUTPUT_FILE" ;;
@@ -722,6 +869,12 @@ if [[ "$MODE" == "automatic" ]]; then
     echo "Full log: $LOG_FILE" >&2
     exit 1
   fi
+
+  # Through the same checker as every other call site: the Claude parser's
+  # JSON-text fallback never meets the output schema, so the schema's required
+  # run_handle is not enough, and a second implementation here would leave the
+  # GPT path passing when the checker is missing — the opposite of fail-closed.
+  enforce_result_handle "$OUTPUT_FILE" automatic
 
   set +e
   python3 - "$OUTPUT_FILE" "$PROVIDER_LABEL" <<'PY'

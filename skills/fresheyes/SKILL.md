@@ -94,10 +94,11 @@ Each poll returns one JSON line. The `state` field and the command's exit code t
 | `killed_at_launch` | 3 | the child never wrote its first heartbeat | do what the `message` says: re-run the SAME command with `--foreground`, with a harness/exec timeout longer than the review (5-30 min) |
 | `died` | 4 | heartbeat went stale and the review process is gone, no verdict | inspect the log at the path in `message` first (evidence); optionally re-run with `--foreground` |
 | `unknown_handle` | 5 | no tracker for this handle | the handle is wrong, or its trackers were removed (e.g. /tmp cleanup); re-check the receipt, else relaunch |
+| `handle_mismatch` | 6 | the result carries a DIFFERENT review run's marker, or could not be tied to this run at all | do not use the text and do not read the log back for it — it is another review's. Relaunch from Step 4 and tell the user the review was refused |
 
-`launching` and `running` are healthy states — never treat them as failures, and never abort a poll loop on them. The three failure states carry a `message` field with the observation, likely cause, and the exact remediation; relay it and follow it.
+`launching` and `running` are healthy states — never treat them as failures, and never abort a poll loop on them. The four failure states carry a `message` field with the observation, likely cause, and the exact remediation; relay it and follow it.
 
-Poll exit-tolerantly: the failure states return NONZERO exit codes (3/4/5), so a `set -e`-style loop would abort on the very poll that carries the diagnosis. Capture the output and branch on the JSON `state` field (or the captured exit code):
+Poll exit-tolerantly: the failure states return NONZERO exit codes (3/4/5/6), so a `set -e`-style loop would abort on the very poll that carries the diagnosis. Capture the output and branch on the JSON `state` field (or the captured exit code):
 
     output=$(bash <base-directory>/fresheyes-progress.sh --json <handle> || true)
 
@@ -105,7 +106,7 @@ then read `state` from the captured JSON. Never let a nonzero poll exit kill you
 
 ### Step 6: Interpret and act
 
-The state table in Step 5 is authoritative. Acting on each of the six states:
+The state table in Step 5 is authoritative. Acting on each of the seven states:
 
 - **`launching` or `running`** → healthy; keep polling on the Step 5 cadence.
 - **`complete` + `verdict=passed`** → the review passed. Proceed to Step 7.
@@ -114,6 +115,7 @@ The state table in Step 5 is authoritative. Acting on each of the six states:
 - **`killed_at_launch`** → do what the `message` says: re-run the SAME launch command with `--foreground`, after making sure your harness/exec timeout for that call is longer than the review (5-30 min; request/configure at least 30 minutes).
 - **`died`** → relay the `message` — it leads with the log path as evidence. Optionally re-run with `--foreground` (same timeout requirement as above).
 - **`unknown_handle`** → re-check the handle against the receipt's `FRESHPID=` line; if the handle is right, its trackers were removed (e.g. /tmp cleanup) — relaunch from Step 4.
+- **`handle_mismatch`** → the result is not this run's review: it carries another run's marker, or it could not be tied to this run at all. `--result` refuses to print it. Do NOT go looking for the text in the log — the log holds exactly the text that was withheld, and it is not evidence about this run. Relaunch from Step 4, and tell the user the review was refused and why.
 
 Do not kill a Fresh Eyes process. If it appears stuck, escalate to the user with evidence instead of stopping it. Evidence should include at least two consecutive `--json` snapshots showing unchanged `line_count`, unchanged `last_log_mtime_epoch`, unchanged `provider_events` when present, and the relevant `pid_state` / `owner_pid_state` values.
 
@@ -127,7 +129,16 @@ When `state=complete`, fetch the final review text:
 bash "<base-directory>/fresheyes-progress.sh" --result <handle>
 ```
 
-Output the review response exactly as returned. Do not report a running review as failed unless `--json` reports one of the failure states (`killed_at_launch`, `died`, `unknown_handle`).
+Output the review response exactly as returned. Do not report a running review as failed unless `--json` reports one of the failure states (`killed_at_launch`, `died`, `unknown_handle`, `handle_mismatch`).
+
+Each result is bound to its run: the reviewer is asked to end its review with a
+`FRESHEYES-RUN:` line carrying this run's handle, and both the launcher and this script
+check it. `--json` reports `handle_verified`. A result with no marker at all — every
+result written before this check existed, and any run whose reviewer dropped the line —
+is still the review and is still returned, with `handle_verified: false`; a result
+carrying a DIFFERENT run's marker is refused (`handle_mismatch`, exit 6). In automatic
+mode, which is a commit gate, a result that cannot be tied to the run blocks the commit;
+the escape hatch there is the hook's own, `git commit --no-verify`.
 
 ## Parallel reviews
 

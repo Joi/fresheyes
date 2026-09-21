@@ -523,6 +523,63 @@ $after"
   fi
 }
 
+test_foreign_marker_is_refused() {
+  local handle base output status
+  handle="20260303-121212-eeeeee"
+  base="$LOG_DIR/fresheyes-$handle.log"
+  mkdir -p "$LOG_DIR"
+  printf 'transcript line\n' > "$base"
+  cat > "$base.result.md" <<'TEXT'
+## Files Examined
+
+- calc.py
+
+INDEPENDENT CODE REVIEW FAILED
+FRESHEYES-RUN: 20260101-000000-aaaaaa
+TEXT
+  cat > "$base.status.json" <<JSON
+{"exit_code":0,"handle":"$handle","heartbeat_at":1772000000.0,"launched_at":1772000000.0,"log_path":"$base","mode":"manual","provider":"gpt","result_path":"$base.result.md","severity":"info","state":"complete","updated_at_epoch":1772000000.0,"verdict":"failed"}
+JSON
+  write_locator_alias "$handle" "$base"
+
+  set +e
+  output=$(run_progress --json "$handle")
+  status=$?
+  set -e
+  assert_equals "$status" "6" "foreign marker JSON exit code"
+  assert_json_field_equals "$output" "state" "handle_mismatch" "foreign marker JSON state"
+  assert_json_field_equals "$output" "result_available" "false" "foreign marker result availability"
+  assert_json_field_equals "$output" "result_handle" "20260101-000000-aaaaaa" "foreign marker reports the foreign handle"
+
+  set +e
+  output=$(run_progress --result "$handle")
+  status=$?
+  set -e
+  assert_equals "$status" "6" "foreign marker --result exit code"
+  case "$output" in
+    *"INDEPENDENT CODE REVIEW FAILED"*)
+      fail "foreign marker --result returned the refused review"
+      ;;
+  esac
+}
+
+test_record_without_handle_is_delivered() {
+  local pid base output
+  dead_pid pid
+  base="$LOG_DIR/fresheyes-test-$pid.log"
+  write_active "$pid" "$base"
+  cat > "$base" <<'TEXT'
+## Files Examined
+
+- README.md
+
+INDEPENDENT CODE REVIEW PASSED
+TEXT
+
+  output=$(run_progress --result "$pid")
+  assert_contains "$output" "INDEPENDENT CODE REVIEW PASSED" "record with no handle is still delivered"
+}
+
 test_alive_claude_sidecars_missing_log
 test_alive_claude_sidecars_empty_log
 test_legacy_no_pid_preserves_numeric_progress
@@ -541,5 +598,7 @@ test_opaque_handle_resolves_via_locator
 test_owner_pid_read_from_status_json
 test_parent_alias_no_longer_resolves
 test_progress_is_read_only
+test_foreign_marker_is_refused
+test_record_without_handle_is_delivered
 
 printf 'fresheyes-progress tests passed\n'

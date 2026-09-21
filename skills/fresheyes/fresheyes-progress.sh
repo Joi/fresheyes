@@ -17,6 +17,8 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Shared with fresheyes.sh: the one home for the verdict marker.
 VERDICT_PARSER="$SCRIPT_DIR/fresheyes-verdict.py"
+# Shared with fresheyes.sh: the one home for the run marker.
+HANDLE_PARSER="$SCRIPT_DIR/fresheyes-handle.py"
 GLOBAL_LOG_DIR="${FRESHEYES_GLOBAL_LOG_DIR:-/tmp/fresheyes-logs}"
 LOG_DIR="${FRESHEYES_LOG_DIR:-$GLOBAL_LOG_DIR}"
 ALLOW_LEGACY_PROGRESS="${FRESHEYES_ALLOW_LEGACY_PROGRESS:-0}"
@@ -281,22 +283,46 @@ line_count_or_zero() {
   fi
 }
 
-detect_manual_verdict() {
+# The file that IS the run's result, as opposed to its transcript. Verification,
+# delivery and the verdict all read THIS file: verifying one file and printing
+# another would let a verified status endorse text nothing checked. A recorded
+# result_path that will not read is NOT silently replaced by the transcript —
+# the transcript is tee'd provider stdout and holds whatever the reviewer read,
+# including other runs' reviews.
+resolve_result_file() {
   local base="$1"
-  python3 "$VERDICT_PARSER" "$base" 2>/dev/null
-}
-
-print_final_review_if_nonempty() {
-  local base="$1"
+  local recorded
+  recorded=$(status_file_field "$base" "result_path" 2>/dev/null || true)
+  if [[ -n "$recorded" ]]; then
+    printf '%s\n' "$recorded"
+    return 0
+  fi
   local provider mode
   provider=$(status_file_field "$base" "provider" 2>/dev/null || true)
   mode=$(status_file_field "$base" "mode" 2>/dev/null || true)
   if [[ "$provider" == "gpt" && "$mode" == "manual" && -s "$base.result.md" ]]; then
-    cat "$base.result.md"
+    printf '%s\n' "$base.result.md"
     return 0
   fi
-  if [[ -s "$base" ]]; then
-    cat "$base"
+  printf '%s\n' "$base"
+}
+
+detect_manual_verdict() {
+  local base="$1"
+  local review_file
+  review_file=$(resolve_result_file "$base")
+  if [[ ! -s "$review_file" ]]; then
+    review_file="$base"
+  fi
+  python3 "$VERDICT_PARSER" "$review_file" 2>/dev/null
+}
+
+print_final_review_if_nonempty() {
+  local base="$1"
+  local review_file
+  review_file=$(resolve_result_file "$base")
+  if [[ -s "$review_file" ]]; then
+    cat "$review_file"
     return 0
   fi
   return 1
@@ -363,12 +389,13 @@ print_json_status() {
   local verdict="$7"
   local message="${8:-}"
 
-  python3 - "$state" "$base" "$requested_pid" "$owner_pid" "$requested_pid_state" "$owner_pid_state" "$verdict" "$message" <<'PY'
+  python3 - "$state" "$base" "$requested_pid" "$owner_pid" "$requested_pid_state" "$owner_pid_state" "$verdict" "$message" "${HANDLE_VERIFIED:-}" "${RESULT_HANDLE:-}" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-state, base_arg, requested_pid, owner_pid, requested_pid_state, owner_pid_state, verdict, message = sys.argv[1:9]
+(state, base_arg, requested_pid, owner_pid, requested_pid_state, owner_pid_state,
+ verdict, message, handle_verified, result_handle) = sys.argv[1:11]
 
 record = {"state": state}
 record["handle"] = requested_pid
@@ -466,7 +493,13 @@ if verdict:
     record["verdict"] = verdict
 elif isinstance(status_data.get("verdict"), str) and status_data["verdict"]:
     record["verdict"] = status_data["verdict"]
+if handle_verified in ("true", "false"):
+    record["handle_verified"] = handle_verified == "true"
+if result_handle:
+    record["result_handle"] = result_handle
 record["result_available"] = bool(record.get("verdict") and record.get("line_count", 0) > 0)
+if state == "handle_mismatch":
+    record["result_available"] = False
 
 print(json.dumps(record, separators=(",", ":"), sort_keys=True))
 PY
@@ -532,14 +565,21 @@ PY
   fi
 }
 
+# print_failure_diagnostic <base> [withhold_stderr]
+# With withhold_stderr=1 the provider's stderr is named, not quoted: on a run
+# whose result could not be verified, those lines are unverified review text and
+# must not reach the caller through a diagnostic. The killed_at_launch and died
+# paths, where no result exists at all, keep the quoted tail.
 print_failure_diagnostic() {
   local base="$1"
-  python3 - "$base" <<'PY' 2>/dev/null || true
+  local withhold_stderr="${2:-0}"
+  python3 - "$base" "$withhold_stderr" <<'PY' 2>/dev/null || true
 import json
 import sys
 from pathlib import Path
 
 base = Path(sys.argv[1])
+withhold_stderr = len(sys.argv) > 2 and sys.argv[2] == "1"
 event_log = Path(str(base) + ".events.jsonl")
 stderr_log = Path(str(base) + ".stderr")
 stream_log = Path(str(base) + ".stream.jsonl")
@@ -565,7 +605,7 @@ if event_log.exists():
                 last_error = str(item.get("event") or item.get("message") or last_error)
 
 stderr_lines = []
-if stderr_log.exists():
+if stderr_log.exists() and not withhold_stderr:
     try:
         stderr_lines = stderr_log.read_text(encoding="utf-8", errors="replace").splitlines()[-20:]
     except OSError:
@@ -581,7 +621,10 @@ print()
 print(f"provider={provider}")
 print(f"last_event={last_event}")
 print(f"last_error={last_error}")
-if stderr_lines:
+if withhold_stderr and stderr_log.exists():
+    print()
+    print(f"stderr (withheld — this run's result could not be verified): {stderr_log}")
+elif stderr_lines:
     print()
     print("stderr:")
     for line in stderr_lines:
@@ -596,6 +639,19 @@ elif event_log.exists() or stream_log.exists():
 PY
 }
 
+# The refusal's own diagnostic: metadata and paths, never the review text and
+# never the provider's stderr.
+print_mismatch_diagnostic() {
+  local base="$1"
+  printf '%s\n' "$MESSAGE"
+  printf '\n'
+  printf 'state=handle_mismatch\n'
+  printf 'expected_handle=%s\n' "${EXPECTED_HANDLE:-unknown}"
+  printf 'result_handle=%s\n' "${RESULT_HANDLE:-unknown}"
+  printf 'log_path=%s\n' "$base"
+  printf 'result_path=%s\n' "$(resolve_result_file "$base")"
+}
+
 print_result_or_pending() {
   local state="$1"
   local base="$2"
@@ -605,7 +661,7 @@ print_result_or_pending() {
       if print_final_review_if_nonempty "$base"; then
         return 0
       fi
-      print_failure_diagnostic "$base"
+      print_failure_diagnostic "$base" "$WITHHOLD_STDERR"
       return 1
       ;;
     *)
@@ -661,6 +717,38 @@ fi
 STATUS_STATE=$(status_file_field "$LOG_FILE" "state" 2>/dev/null || true)
 STATUS_VERDICT=$(status_file_field "$LOG_FILE" "verdict" 2>/dev/null || true)
 STATUS_EXIT_CODE=$(status_file_field "$LOG_FILE" "exit_code" 2>/dev/null || true)
+STATUS_HANDLE=$(status_file_field "$LOG_FILE" "handle" 2>/dev/null || true)
+STATUS_RESULT_HANDLE=$(status_file_field "$LOG_FILE" "result_handle" 2>/dev/null || true)
+# The expectation is the handle the CALLER polled with: it is what resolved the
+# tracker, and it does not come from the file this script declines to trust.
+# status.json's handle answers only the legacy no-handle invocation.
+EXPECTED_HANDLE="$PID"
+if [[ -z "$EXPECTED_HANDLE" ]]; then
+  EXPECTED_HANDLE="$STATUS_HANDLE"
+fi
+HANDLE_VERIFIED=""
+RESULT_HANDLE=""
+WITHHOLD_STDERR=0
+
+# Ask the one home for the run marker whose review the resolved result is.
+# Sets HANDLE_VERIFIED (true/false) and RESULT_HANDLE; returns the checker's
+# status. Never lets an unhandled exit take the poller down.
+# The caller wraps this in `set +e` … `set -e`: this function must not restore
+# errexit itself, or its own non-zero return would take the poller down before
+# the caller could read it.
+verify_result_handle() {
+  local base="$1"
+  local review_file output status
+  review_file=$(resolve_result_file "$base")
+  output="$(python3 "$HANDLE_PARSER" "$review_file" "$EXPECTED_HANDLE" 2>/dev/null)"
+  status=$?
+  case "$status" in
+    0) HANDLE_VERIFIED="true" ;;
+    6) HANDLE_VERIFIED="false"; RESULT_HANDLE="${output#mismatch }" ;;
+    *) HANDLE_VERIFIED="false" ;;
+  esac
+  return "$status"
+}
 HEARTBEAT_AT=$(status_file_field "$LOG_FILE" "heartbeat_at" 2>/dev/null || true)
 LAUNCHED_AT=$(status_file_field "$LOG_FILE" "launched_at" 2>/dev/null || true)
 NOW_EPOCH=$(date +%s)
@@ -696,8 +784,51 @@ fi
 
 MESSAGE=""
 STATE_EXIT_CODE=0
-if [[ "$STATUS_STATE" == "complete" || -n "$VERDICT" ]]; then
+_mismatch_message() {
+  local foreign="${1:-another review run}"
+  printf 'handle_mismatch — this result carries review run %s, not %s. It is another review'"'"'s text, so it was not returned; re-run the review. The withheld text is in %s, which is not evidence about this run and must not be read back.' \
+    "$foreign" "${EXPECTED_HANDLE:-this run}" "$LOG_FILE"
+}
+if [[ "$STATUS_STATE" == "handle_mismatch" ]]; then
+  # Recorded by the runner. This branch precedes the "failed" → died branch so
+  # a detached run's refusal is never reported as a death.
+  REVIEW_STATE="handle_mismatch"
+  STATE_EXIT_CODE=6
+  HANDLE_VERIFIED="false"
+  RESULT_HANDLE="$STATUS_RESULT_HANDLE"
+  WITHHOLD_STDERR=1
+  MESSAGE=$(_mismatch_message "$STATUS_RESULT_HANDLE")
+elif [[ "$STATUS_STATE" == "complete" || -n "$VERDICT" ]]; then
   REVIEW_STATE="complete"
+  # Verify for ourselves, whatever status.json claims: the poller is what the
+  # caller trusts, and a status file written by another version, or by a racing
+  # writer, must not be able to talk it into printing a foreign review.
+  if [[ -n "$EXPECTED_HANDLE" ]]; then
+    set +e
+    verify_result_handle "$LOG_FILE"
+    _handle_status=$?
+    set -e
+    case "$_handle_status" in
+      0) : ;;
+      6)
+        REVIEW_STATE="handle_mismatch"
+        STATE_EXIT_CODE=6
+        VERDICT=""
+        WITHHOLD_STDERR=1
+        MESSAGE=$(_mismatch_message "$RESULT_HANDLE")
+        ;;
+      7)
+        # The checker ran and could not read the resolved result: there is no
+        # text to deliver, and the diagnostic that follows must not quote the
+        # provider's stderr in its place.
+        WITHHOLD_STDERR=1
+        ;;
+      *)
+        # No marker (1), or the checker could not run at all: deliver, unverified.
+        :
+        ;;
+    esac
+  fi
 elif [[ "$STATUS_STATE" == "launching" ]]; then
   if _owner_alive || _epoch_within "$LAUNCHED_AT" "$LAUNCH_GRACE_SECS"; then
     REVIEW_STATE="launching"
@@ -738,6 +869,12 @@ if [[ "$OUTPUT_MODE" == "json" ]]; then
 fi
 
 if [[ "$OUTPUT_MODE" == "result" ]]; then
+  if [[ "$REVIEW_STATE" == "handle_mismatch" ]]; then
+    # A diagnostic of its own: print_failure_diagnostic quotes the provider's
+    # stderr, which on a replay is the very review just refused.
+    print_mismatch_diagnostic "$LOG_FILE"
+    exit "$STATE_EXIT_CODE"
+  fi
   if [[ "$REVIEW_STATE" == "killed_at_launch" || "$REVIEW_STATE" == "died" ]]; then
     printf '%s\n' "$MESSAGE"
     print_failure_diagnostic "$LOG_FILE"
@@ -747,11 +884,16 @@ if [[ "$OUTPUT_MODE" == "result" ]]; then
   exit $?
 fi
 
+if [[ "$REVIEW_STATE" == "handle_mismatch" ]]; then
+  print_mismatch_diagnostic "$LOG_FILE"
+  exit "$STATE_EXIT_CODE"
+fi
+
 if [[ "$REVIEW_STATE" == "complete" ]]; then
   if print_final_review_if_nonempty "$LOG_FILE"; then
     exit 0
   fi
-  print_failure_diagnostic "$LOG_FILE"
+  print_failure_diagnostic "$LOG_FILE" "$WITHHOLD_STDERR"
   exit 0
 fi
 

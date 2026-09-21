@@ -2,6 +2,7 @@
   "type": "object",
   "properties": {
     "approve_commit": { "type": "boolean" },
+    "run_handle": { "type": "string" },
     "issues": {
       "type": "array",
       "items": {
@@ -17,6 +18,6 @@
       }
     }
   },
-  "required": ["approve_commit", "issues"],
+  "required": ["approve_commit", "issues", "run_handle"],
   "additionalProperties": false
 }
