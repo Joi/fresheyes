@@ -673,6 +673,34 @@ echo "Fresh Eyes [$$]: review starting. This may take up to 30 minutes, please w
 #              same schema-conforming output file.
 
 CLAUDE_TOOLS='Bash(git diff:*,git show:*,git log:*,git status:*),Read,Glob,Grep'
+# The Claude reviewer is read-only. --allowedTools only pre-approves tools: it
+# removes none, and --dangerously-skip-permissions approves all the others, so
+# together they left Edit, Write and any shell command available. Each flag
+# below closes one gap that was measured with the real CLI (Claude Code 2.1.269):
+#   --tools              the only built-in tools that exist in the session
+#   --allowedTools       of those, what runs without asking
+#   --permission-mode    dontAsk: whatever would prompt is denied, never bypassed
+#   --setting-sources '' the user's and the repo's own allow rules, hooks and
+#                        plugins do not load (an `allow: ["Bash"]` there would
+#                        otherwise grant the shell again)
+#   --strict-mcp-config  no --mcp-config is passed, so no MCP servers load
+# Because settings do not load, neither do `apiKeyHelper` or an `env` block in
+# them: the reviewer needs a logged-in CLI.
+# Claude Code still runs its built-in read-only commands (ls, cat, pwd).
+# The launch also sets GIT_OPTIONAL_LOCKS=0: without it a plain `git status`
+# rewrites .git/index, which is a write to the repository under review.
+# The review prompts ask for `timeout 300s` around slow commands. A wrapped
+# command is no longer one of the allowed git commands and is denied, so the
+# appended system prompt tells the reviewer to run git bare.
+CLAUDE_SHELL_NOTE='Your shell is restricted to bare `git diff`, `git show`, `git log` and `git status` commands. Run them directly: do not wrap them in `timeout` or pipe or chain them into other programs, because such commands are denied. Use Read, Glob and Grep for everything else. If you still cannot read the change under review, say so and do not approve it.'
+CLAUDE_RESTRICT_ARGS=(
+  --tools 'Bash,Read,Glob,Grep'
+  --allowedTools "$CLAUDE_TOOLS"
+  --permission-mode dontAsk
+  --setting-sources ''
+  --strict-mcp-config
+  --append-system-prompt "$CLAUDE_SHELL_NOTE"
+)
 CLAUDE_STREAM_PARSER="$SCRIPT_DIR/fresheyes-claude-stream.py"
 
 # FRESHEYES_CODEX_IGNORE_USER_CONFIG=1 launches the Codex reviewer with
@@ -735,15 +763,14 @@ run_gpt_automatic() {
 
 run_claude_manual() {
   log_event "info" "provider_started" "Claude manual review started."
-  if ! env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_ENTRYPOINT "$CLAUDE_BIN" -p \
+  if ! env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_ENTRYPOINT GIT_OPTIONAL_LOCKS=0 "$CLAUDE_BIN" -p \
     --model "$MODEL" \
     --effort "$REASONING_EFFORT" \
     --output-format stream-json \
     --verbose \
     --include-partial-messages \
     --disable-slash-commands \
-    --allowedTools "$CLAUDE_TOOLS" \
-    --dangerously-skip-permissions \
+    "${CLAUDE_RESTRICT_ARGS[@]}" \
     -- \
     "$PROMPT" 2>"$STDERR_LOG" | python3 "$CLAUDE_STREAM_PARSER" \
       --mode manual \
@@ -765,7 +792,7 @@ run_claude_automatic() {
   json_schema=$(cat "$SCHEMA_FILE")
 
   log_event "info" "provider_started" "Claude automatic review started."
-  if ! env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_ENTRYPOINT "$CLAUDE_BIN" -p \
+  if ! env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_ENTRYPOINT GIT_OPTIONAL_LOCKS=0 "$CLAUDE_BIN" -p \
     --model "$MODEL" \
     --effort "$REASONING_EFFORT" \
     --output-format stream-json \
@@ -773,8 +800,7 @@ run_claude_automatic() {
     --include-partial-messages \
     --disable-slash-commands \
     --json-schema "$json_schema" \
-    --allowedTools "$CLAUDE_TOOLS" \
-    --dangerously-skip-permissions \
+    "${CLAUDE_RESTRICT_ARGS[@]}" \
     -- \
     "$PROMPT" 2>"$STDERR_LOG" | python3 "$CLAUDE_STREAM_PARSER" \
       --mode automatic \
