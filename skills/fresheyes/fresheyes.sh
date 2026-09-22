@@ -497,10 +497,15 @@ launch_via_systemd_run() {
   # be silently corrupted. Escape every '$' as '$$'; systemd unescapes it back,
   # delivering the child's argv byte-identical to ORIG_ARGS. --setenv VALUES
   # are not expansion-subject, so the forwards above need no escaping.
+  # The pattern and replacement are held in variables: quoting them inline
+  # as ${arg//'$'/'$$'} is a bash 4+ reading, and bash 3.2 (macOS's
+  # /bin/bash) instead keeps the quotes literally and expands $$ to its own
+  # pid, turning a scope's '$' into "'12345'".
+  local dollar='$' escaped_dollar='$$'
   local -a unit_args=()
   local arg
   for arg in "${ORIG_ARGS[@]}"; do
-    unit_args+=("${arg//'$'/'$$'}")
+    unit_args+=("${arg//$dollar/$escaped_dollar}")
   done
   systemd-run --user --collect --quiet \
     --property=WorkingDirectory="$PWD" \

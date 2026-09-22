@@ -44,7 +44,32 @@ PY
 }
 
 snapshot_dir() {
-  find "$1" -mindepth 1 -printf '%p %s %T@\n' 2>/dev/null | sort
+  # `find -printf` is GNU-only — on BSD find it fails, and under `set -o
+  # pipefail` that aborted this file's last test outright. python3 walks the
+  # tree the same way and is already a prerequisite here.
+  python3 - "$1" <<'SNAPSHOT_PY'
+import os
+import sys
+
+
+def reraise(error):
+    raise error
+
+
+root = sys.argv[1]
+rows = []
+# A tree this cannot read is a failed fingerprint, not a short one: an
+# ignored error would leave before and after agreeing about a subtree
+# neither of them looked at. os.walk swallows its errors unless onerror
+# raises, and lstat failures are left to propagate for the same reason.
+for dirpath, dirnames, filenames in os.walk(root, onerror=reraise):
+    for name in dirnames + filenames:
+        path = os.path.join(dirpath, name)
+        info = os.lstat(path)
+        rows.append("%s %d %r" % (path, info.st_size, info.st_mtime))
+for row in sorted(rows):
+    print(row)
+SNAPSHOT_PY
 }
 
 # Fake claude provider: emits a minimal valid stream and a PASSED verdict.
@@ -470,7 +495,12 @@ if [[ "$seen_cmd" -eq 0 ]]; then exit 1; fi
 # Model real systemd's expansion of the unit argv (probed live):
 # ${VAR} -> value from the unit env (empty when unset), $$ -> $,
 # bare $VAR left alone.
-mapfile -d '' -t cmd < <(python3 - "${child_env[@]}" -- "${cmd[@]}" <<'PY'
+# bash 3.2 (macOS's /bin/bash) has no mapfile; read the NUL-delimited
+# result into the array by hand instead.
+declare -a expanded=()
+while IFS= read -r -d '' item; do
+  expanded+=("$item")
+done < <(python3 - "${child_env[@]}" -- "${cmd[@]}" <<'PY'
 import sys
 args = sys.argv[1:]
 split = args.index("--")
@@ -498,6 +528,7 @@ for arg in args[split + 1:]:
 sys.stdout.write("\x00".join(out) + "\x00")
 PY
 )
+cmd=("${expanded[@]}")
 # Run detached-ish: background with a clean env (unit semantics).
 env -i "${child_env[@]}" "${cmd[@]}" &
 exit 0
