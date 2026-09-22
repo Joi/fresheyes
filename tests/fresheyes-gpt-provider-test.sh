@@ -37,10 +37,19 @@ if not sys.stdin.isatty():
 with open(os.environ["FRESHEYES_FAKE_ARGV"], "w", encoding="utf-8") as handle:
     json.dump(sys.argv[1:], handle)
 
+# The run's handle reaches the reviewer only through the prompt: the launch
+# strips FRESHEYES_HANDLE from the environment. Echoing it back is also the
+# assertion that {{RUN_HANDLE}} was substituted.
+import re
+run_handle = ""
+if sys.argv[1:]:
+    found = re.search(r"FRESHEYES-RUN:\s*([A-Za-z0-9][A-Za-z0-9._-]*)", sys.argv[-1])
+    run_handle = found.group(1) if found else ""
+
 if "--output-schema" in sys.argv:
     output_path = sys.argv[sys.argv.index("-o") + 1]
     with open(output_path, "w", encoding="utf-8") as handle:
-        json.dump({"approve_commit": True, "issues": []}, handle)
+        json.dump({"approve_commit": True, "issues": [], "run_handle": run_handle}, handle)
     print("fake automatic Codex review complete")
 else:
     if "-o" in sys.argv:
@@ -50,6 +59,8 @@ else:
             handle.write("- README.md\n")
             if os.environ.get("FRESHEYES_FAKE_OMIT_VERDICT") != "1":
                 handle.write("INDEPENDENT CODE REVIEW PASSED\n")
+            if run_handle:
+                handle.write("FRESHEYES-RUN: %s\n" % run_handle)
     for index in range(10_000):
         print(f"fake Codex diagnostic line {index}")
     if os.environ.get("FRESHEYES_FAKE_OMIT_VERDICT") == "1":
