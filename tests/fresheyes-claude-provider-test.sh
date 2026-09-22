@@ -217,6 +217,8 @@ run_runner_capture() {
     FRESHEYES_GPT_MODEL="gpt-5.6-terra" \
     FRESHEYES_CLAUDE_MODEL= \
     FRESHEYES_MODEL= \
+    FRESHEYES_REASONING= \
+    FRESHEYES_CODEX_IGNORE_USER_CONFIG= \
     FRESHEYES_FAKE_CLAUDE_VERSION_PROBE="$VERSION_PROBE_FILE" \
     PATH="$FAKE_BIN:$PATH" \
     FRESHEYES_FAKE_ARGV="$ARGV_FILE" \
@@ -440,6 +442,8 @@ test_fable_5_1_rejects_old_claude_code() {
     FRESHEYES_GLOBAL_LOG_DIR="$run_tmp/global-fresheyes-logs" \
     FRESHEYES_CLAUDE_MODEL= \
     FRESHEYES_MODEL= \
+    FRESHEYES_REASONING= \
+    FRESHEYES_CODEX_IGNORE_USER_CONFIG= \
     FRESHEYES_FAKE_CLAUDE_VERSION="2.1.256" \
     FRESHEYES_FAKE_CLAUDE_VERSION_PROBE="$VERSION_PROBE_FILE" \
     PATH="$FAKE_BIN:$PATH" \
@@ -466,6 +470,8 @@ test_fable_5_1_accepts_exact_minimum() {
     FRESHEYES_GLOBAL_LOG_DIR="$run_tmp/global-fresheyes-logs" \
     FRESHEYES_CLAUDE_MODEL= \
     FRESHEYES_MODEL= \
+    FRESHEYES_REASONING= \
+    FRESHEYES_CODEX_IGNORE_USER_CONFIG= \
     FRESHEYES_FAKE_CLAUDE_VERSION="2.1.257" \
     FRESHEYES_FAKE_CLAUDE_VERSION_PROBE="$VERSION_PROBE_FILE" \
     PATH="$FAKE_BIN:$PATH" \
@@ -500,6 +506,8 @@ test_fable_5_override_keeps_its_own_gate() {
     FRESHEYES_GLOBAL_LOG_DIR="$run_tmp/global-fresheyes-logs" \
     FRESHEYES_CLAUDE_MODEL="claude-fable-5" \
     FRESHEYES_MODEL= \
+    FRESHEYES_REASONING= \
+    FRESHEYES_CODEX_IGNORE_USER_CONFIG= \
     FRESHEYES_FAKE_CLAUDE_VERSION="2.1.170" \
     FRESHEYES_FAKE_CLAUDE_VERSION_PROBE="$VERSION_PROBE_FILE" \
     PATH="$FAKE_BIN:$PATH" \
@@ -529,6 +537,8 @@ PY
     FRESHEYES_GLOBAL_LOG_DIR="$run_tmp/global-fresheyes-logs" \
     FRESHEYES_CLAUDE_MODEL="claude-fable-5" \
     FRESHEYES_MODEL= \
+    FRESHEYES_REASONING= \
+    FRESHEYES_CODEX_IGNORE_USER_CONFIG= \
     FRESHEYES_FAKE_CLAUDE_VERSION="2.1.169" \
     FRESHEYES_FAKE_CLAUDE_VERSION_PROBE="$VERSION_PROBE_FILE" \
     PATH="$FAKE_BIN:$PATH" \
@@ -552,6 +562,8 @@ test_claude_specific_model_override_wins() {
     FRESHEYES_GLOBAL_LOG_DIR="$run_tmp/global-fresheyes-logs" \
     FRESHEYES_CLAUDE_MODEL="opus" \
     FRESHEYES_MODEL="legacy-model-must-not-win" \
+    FRESHEYES_REASONING= \
+    FRESHEYES_CODEX_IGNORE_USER_CONFIG= \
     PATH="$FAKE_BIN:$PATH" \
     FRESHEYES_FAKE_ARGV="$ARGV_FILE" \
     timeout 30s bash "$RUNNER" --foreground --claude "Review README.md." > "$stdout_file"
@@ -567,6 +579,36 @@ if argv[model_index + 1] != "opus":
 PY
 }
 
+test_reasoning_env_sets_claude_effort() {
+  local run_tmp stdout_file
+  run_tmp="$(mktemp -d "$TEST_TMP/reasoning.XXXXXX")"
+  stdout_file="$run_tmp/stdout.txt"
+  rm -f "$ARGV_FILE"
+
+  TMPDIR="$run_tmp" \
+    FRESHEYES_LOG_DIR="$run_tmp/fresheyes-logs" \
+    FRESHEYES_GLOBAL_LOG_DIR="$run_tmp/global-fresheyes-logs" \
+    FRESHEYES_CLAUDE_MODEL= \
+    FRESHEYES_MODEL= \
+    FRESHEYES_REASONING=high \
+    FRESHEYES_CODEX_IGNORE_USER_CONFIG=1 \
+    PATH="$FAKE_BIN:$PATH" \
+    FRESHEYES_FAKE_ARGV="$ARGV_FILE" \
+    timeout 30s bash "$RUNNER" --foreground --claude "Review README.md." > "$stdout_file"
+
+  "$PYTHON" - "$ARGV_FILE" <<'PY'
+import json
+import sys
+
+argv = json.load(open(sys.argv[1], encoding="utf-8"))
+effort_idx = argv.index("--effort")
+if effort_idx + 1 >= len(argv) or argv[effort_idx + 1] != "high":
+    raise SystemExit(f"FRESHEYES_REASONING=high did not reach the Claude launch: {argv!r}")
+if "--ignore-user-config" in argv:
+    raise SystemExit(f"the Codex-only user-config flag leaked into the Claude launch: {argv!r}")
+PY
+}
+
 make_fake_claude
 test_manual_claude_invocation_uses_streaming_flags
 test_automatic_claude_extracts_structured_output
@@ -576,6 +618,7 @@ test_manual_detaches_by_default_and_completes
 test_manual_foreground_runs_synchronously
 test_automatic_mode_does_not_detach
 test_fable_5_1_rejects_old_claude_code
+test_reasoning_env_sets_claude_effort
 test_fable_5_1_accepts_exact_minimum
 test_fable_5_override_keeps_its_own_gate
 test_claude_specific_model_override_wins

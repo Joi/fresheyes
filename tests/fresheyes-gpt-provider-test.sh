@@ -29,6 +29,11 @@ if sys.argv[1:] == ["--version"]:
     print(f"codex-cli {os.environ.get('FRESHEYES_FAKE_VERSION', '0.153.4')}")
     raise SystemExit(0)
 
+# Like the real codex exec: when stdin is not a TTY, read it to EOF before
+# doing anything. A launcher that leaves an open, silent stdin hangs here.
+if not sys.stdin.isatty():
+    sys.stdin.read()
+
 with open(os.environ["FRESHEYES_FAKE_ARGV"], "w", encoding="utf-8") as handle:
     json.dump(sys.argv[1:], handle)
 
@@ -59,6 +64,8 @@ PATH="$FAKE_BIN:$PATH" \
   FRESHEYES_FAKE_VERSION_PROBE="$VERSION_PROBE_FILE" \
   FRESHEYES_GPT_MODEL= \
   FRESHEYES_MODEL= \
+  FRESHEYES_REASONING= \
+  FRESHEYES_CODEX_IGNORE_USER_CONFIG= \
   FRESHEYES_MODE=manual \
   timeout 30s bash "$RUNNER" --foreground --gpt --manual "Review README.md." > "$STDOUT_FILE"
 
@@ -113,6 +120,8 @@ assert_unsupported_version() {
     FRESHEYES_GLOBAL_LOG_DIR="$TEST_TMP/unsupported-$slug-global-logs" \
     FRESHEYES_GPT_MODEL= \
     FRESHEYES_MODEL= \
+    FRESHEYES_REASONING= \
+    FRESHEYES_CODEX_IGNORE_USER_CONFIG= \
     FRESHEYES_MODE=manual \
     timeout 30s bash "$RUNNER" --foreground --gpt --manual "Review README.md." > "$stdout_file" 2> "$stderr_file"
   status=$?
@@ -145,6 +154,8 @@ PATH="$FAKE_BIN:$PATH" \
   FRESHEYES_GLOBAL_LOG_DIR="$TEST_TMP/boundary-global-logs" \
   FRESHEYES_GPT_MODEL= \
   FRESHEYES_MODEL= \
+  FRESHEYES_REASONING= \
+  FRESHEYES_CODEX_IGNORE_USER_CONFIG= \
   FRESHEYES_MODE=manual \
   timeout 30s bash "$RUNNER" --foreground --gpt --manual "Review README.md." > /dev/null
 
@@ -168,6 +179,8 @@ PATH="$FAKE_BIN:$PATH" \
   FRESHEYES_GLOBAL_LOG_DIR="$TEST_TMP/terra-global-logs" \
   FRESHEYES_GPT_MODEL="gpt-5.6-terra" \
   FRESHEYES_MODEL="legacy-model-must-not-win" \
+  FRESHEYES_REASONING= \
+  FRESHEYES_CODEX_IGNORE_USER_CONFIG= \
   FRESHEYES_MODE=manual \
   timeout 30s bash "$RUNNER" --foreground --gpt --manual "Review README.md." > "$TERRA_STDOUT_FILE"
 
@@ -195,6 +208,8 @@ PATH="$FAKE_BIN:$PATH" \
   FRESHEYES_GLOBAL_LOG_DIR="$TEST_TMP/terra-old-cli-global-logs" \
   FRESHEYES_GPT_MODEL="gpt-5.6-terra" \
   FRESHEYES_MODEL= \
+  FRESHEYES_REASONING= \
+  FRESHEYES_CODEX_IGNORE_USER_CONFIG= \
   FRESHEYES_MODE=manual \
   timeout 30s bash "$RUNNER" --foreground --gpt --manual "Review README.md." > /dev/null
 
@@ -221,6 +236,8 @@ PATH="$FAKE_BIN:$PATH" \
   FRESHEYES_GLOBAL_LOG_DIR="$TEST_TMP/terra-gate-global-logs" \
   FRESHEYES_GPT_MODEL="gpt-5.6-terra" \
   FRESHEYES_MODEL= \
+  FRESHEYES_REASONING= \
+  FRESHEYES_CODEX_IGNORE_USER_CONFIG= \
   FRESHEYES_MODE=manual \
   timeout 30s bash "$RUNNER" --foreground --gpt --manual "Review README.md." > "$terra_gate_stdout" 2> "$terra_gate_stderr"
 terra_gate_status=$?
@@ -245,6 +262,8 @@ PATH="$FAKE_BIN:$PATH" \
   FRESHEYES_GLOBAL_LOG_DIR="$TEST_TMP/automatic-global-logs" \
   FRESHEYES_GPT_MODEL= \
   FRESHEYES_MODEL= \
+  FRESHEYES_REASONING= \
+  FRESHEYES_CODEX_IGNORE_USER_CONFIG= \
   FRESHEYES_MODE=manual \
   timeout 30s bash "$RUNNER" --foreground --gpt --automatic "Review staged changes." > "$AUTOMATIC_STDOUT_FILE"
 
@@ -284,6 +303,8 @@ detached_launch=$(
     FRESHEYES_GLOBAL_LOG_DIR="$DETACHED_GLOBAL_LOG_DIR" \
     FRESHEYES_GPT_MODEL= \
     FRESHEYES_MODEL= \
+    FRESHEYES_REASONING= \
+    FRESHEYES_CODEX_IGNORE_USER_CONFIG= \
     FRESHEYES_MODE=manual \
     timeout 30s bash "$RUNNER" --gpt --manual "Review README.md."
 )
@@ -339,6 +360,8 @@ PATH="$FAKE_BIN:$PATH" \
   FRESHEYES_GLOBAL_LOG_DIR="$TEST_TMP/no-verdict-global-logs" \
   FRESHEYES_GPT_MODEL= \
   FRESHEYES_MODEL= \
+  FRESHEYES_REASONING= \
+  FRESHEYES_CODEX_IGNORE_USER_CONFIG= \
   FRESHEYES_MODE=manual \
   timeout 30s bash "$RUNNER" --foreground --gpt --manual "Review README.md." > "$TEST_TMP/no-verdict-stdout.txt"
 no_verdict_status_file=$(ls -t "$NO_VERDICT_LOG_DIR"/*.status.json | head -n 1)
@@ -353,5 +376,135 @@ if status.get("state") != "complete":
 if "verdict" in status:
     raise SystemExit(f"incidental transcript verdict leaked into runner status: {status!r}")
 PY
+
+# FRESHEYES_REASONING overrides the manual reasoning level; nothing else in the
+# launch changes and --ignore-user-config stays out unless asked for.
+REASONING_ARGV_FILE="$TEST_TMP/codex-reasoning-argv.json"
+PATH="$FAKE_BIN:$PATH" \
+  FRESHEYES_FAKE_ARGV="$REASONING_ARGV_FILE" \
+  FRESHEYES_FAKE_VERSION_PROBE="$VERSION_PROBE_FILE" \
+  FRESHEYES_LOG_DIR="$TEST_TMP/reasoning-logs" \
+  FRESHEYES_GLOBAL_LOG_DIR="$TEST_TMP/reasoning-global-logs" \
+  FRESHEYES_GPT_MODEL= \
+  FRESHEYES_MODEL= \
+  FRESHEYES_REASONING=high \
+  FRESHEYES_CODEX_IGNORE_USER_CONFIG= \
+  FRESHEYES_MODE=manual \
+  timeout 30s bash "$RUNNER" --foreground --gpt --manual "Review README.md." > /dev/null
+
+python3 - "$REASONING_ARGV_FILE" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    argv = json.load(handle)
+if "model_reasoning_effort=high" not in argv:
+    raise SystemExit(f"FRESHEYES_REASONING=high did not reach the manual GPT launch: {argv!r}")
+if "model_reasoning_effort=xhigh" in argv:
+    raise SystemExit(f"manual GPT launch still carries the xhigh default: {argv!r}")
+if "--ignore-user-config" in argv:
+    raise SystemExit(f"--ignore-user-config appeared without FRESHEYES_CODEX_IGNORE_USER_CONFIG=1: {argv!r}")
+PY
+
+# An unknown reasoning level is refused before any launch.
+BAD_REASONING_ARGV_FILE="$TEST_TMP/codex-bad-reasoning-argv.json"
+BAD_REASONING_STDERR="$TEST_TMP/bad-reasoning-stderr.txt"
+if PATH="$FAKE_BIN:$PATH" \
+  FRESHEYES_FAKE_ARGV="$BAD_REASONING_ARGV_FILE" \
+  FRESHEYES_FAKE_VERSION_PROBE="$VERSION_PROBE_FILE" \
+  FRESHEYES_LOG_DIR="$TEST_TMP/bad-reasoning-logs" \
+  FRESHEYES_GLOBAL_LOG_DIR="$TEST_TMP/bad-reasoning-global-logs" \
+  FRESHEYES_GPT_MODEL= \
+  FRESHEYES_MODEL= \
+  FRESHEYES_REASONING=extreme \
+  FRESHEYES_CODEX_IGNORE_USER_CONFIG= \
+  FRESHEYES_MODE=manual \
+  timeout 30s bash "$RUNNER" --foreground --gpt --manual "Review README.md." > /dev/null 2> "$BAD_REASONING_STDERR"; then
+  printf 'FRESHEYES_REASONING=extreme was accepted\n' >&2
+  exit 1
+fi
+if ! grep -q 'FRESHEYES_REASONING must be one of' "$BAD_REASONING_STDERR"; then
+  printf 'invalid FRESHEYES_REASONING did not explain itself:\n' >&2
+  cat "$BAD_REASONING_STDERR" >&2
+  exit 1
+fi
+if [[ -e "$BAD_REASONING_ARGV_FILE" ]]; then
+  printf 'invalid FRESHEYES_REASONING still launched Codex\n' >&2
+  exit 1
+fi
+
+# FRESHEYES_CODEX_IGNORE_USER_CONFIG=1 adds --ignore-user-config to the manual
+# launch and to the automatic one, which keeps its medium reasoning regardless
+# of FRESHEYES_REASONING.
+IGNORE_ARGV_FILE="$TEST_TMP/codex-ignore-argv.json"
+PATH="$FAKE_BIN:$PATH" \
+  FRESHEYES_FAKE_ARGV="$IGNORE_ARGV_FILE" \
+  FRESHEYES_FAKE_VERSION_PROBE="$VERSION_PROBE_FILE" \
+  FRESHEYES_LOG_DIR="$TEST_TMP/ignore-logs" \
+  FRESHEYES_GLOBAL_LOG_DIR="$TEST_TMP/ignore-global-logs" \
+  FRESHEYES_GPT_MODEL= \
+  FRESHEYES_MODEL= \
+  FRESHEYES_REASONING= \
+  FRESHEYES_CODEX_IGNORE_USER_CONFIG=1 \
+  FRESHEYES_MODE=manual \
+  timeout 30s bash "$RUNNER" --foreground --gpt --manual "Review README.md." > /dev/null
+
+IGNORE_AUTO_ARGV_FILE="$TEST_TMP/codex-ignore-auto-argv.json"
+PATH="$FAKE_BIN:$PATH" \
+  FRESHEYES_FAKE_ARGV="$IGNORE_AUTO_ARGV_FILE" \
+  FRESHEYES_FAKE_VERSION_PROBE="$VERSION_PROBE_FILE" \
+  FRESHEYES_LOG_DIR="$TEST_TMP/ignore-auto-logs" \
+  FRESHEYES_GLOBAL_LOG_DIR="$TEST_TMP/ignore-auto-global-logs" \
+  FRESHEYES_GPT_MODEL= \
+  FRESHEYES_MODEL= \
+  FRESHEYES_REASONING=high \
+  FRESHEYES_CODEX_IGNORE_USER_CONFIG=1 \
+  FRESHEYES_MODE=manual \
+  timeout 30s bash "$RUNNER" --foreground --gpt --automatic "Review staged changes." > /dev/null
+
+python3 - "$IGNORE_ARGV_FILE" "$IGNORE_AUTO_ARGV_FILE" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    manual = json.load(handle)
+with open(sys.argv[2], encoding="utf-8") as handle:
+    automatic = json.load(handle)
+if "--ignore-user-config" not in manual:
+    raise SystemExit(f"manual GPT launch lacks --ignore-user-config: {manual!r}")
+if manual.index("--ignore-user-config") > manual.index("exec") + 1:
+    raise SystemExit(f"--ignore-user-config is not a top-level exec flag: {manual!r}")
+if "model_reasoning_effort=xhigh" not in manual:
+    raise SystemExit(f"manual GPT launch lost its xhigh default: {manual!r}")
+if "--ignore-user-config" not in automatic:
+    raise SystemExit(f"automatic GPT launch lacks --ignore-user-config: {automatic!r}")
+if "model_reasoning_effort=medium" not in automatic:
+    raise SystemExit(f"automatic GPT launch no longer runs at medium with FRESHEYES_REASONING set: {automatic!r}")
+PY
+
+# The launcher's own stdin may be an open pipe nobody closes (a background job,
+# a supervisor). Codex must not inherit it, or the review blocks before its
+# first call.
+STDIN_ARGV_FILE="$TEST_TMP/codex-stdin-argv.json"
+STDIN_STDOUT_FILE="$TEST_TMP/stdin-stdout.txt"
+sleep 60 | PATH="$FAKE_BIN:$PATH" \
+  FRESHEYES_FAKE_ARGV="$STDIN_ARGV_FILE" \
+  FRESHEYES_FAKE_VERSION_PROBE="$VERSION_PROBE_FILE" \
+  FRESHEYES_LOG_DIR="$TEST_TMP/stdin-logs" \
+  FRESHEYES_GLOBAL_LOG_DIR="$TEST_TMP/stdin-global-logs" \
+  FRESHEYES_GPT_MODEL= \
+  FRESHEYES_MODEL= \
+  FRESHEYES_REASONING= \
+  FRESHEYES_CODEX_IGNORE_USER_CONFIG= \
+  FRESHEYES_MODE=manual \
+  timeout 20s bash "$RUNNER" --foreground --gpt --manual "Review README.md." > "$STDIN_STDOUT_FILE" || {
+    printf 'a silent open stdin on the launcher stalled the Codex review (timeout hit)\n' >&2
+    exit 1
+  }
+if ! grep -q '^INDEPENDENT CODE REVIEW PASSED$' "$STDIN_STDOUT_FILE"; then
+  printf 'review with an open launcher stdin did not complete:\n' >&2
+  cat "$STDIN_STDOUT_FILE" >&2
+  exit 1
+fi
 
 printf 'fresheyes-gpt-provider tests passed\n'

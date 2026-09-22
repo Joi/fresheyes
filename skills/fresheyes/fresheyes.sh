@@ -8,7 +8,8 @@ set -euo pipefail
 # --- Defaults ---
 PROVIDER=""
 # Two modes:
-#   manual    – thorough, human-readable markdown review (xhigh reasoning).
+#   manual    – thorough, human-readable markdown review (xhigh reasoning by default;
+#               FRESHEYES_REASONING=low|medium|high|xhigh overrides it for both providers).
 #               Designed for interactive use: rich prose, full context, PASSED/FAILED verdict.
 #   automatic – fast, machine-readable JSON review (medium reasoning).
 #               Designed for pre-commit hooks: structured {approve_commit, issues[]} output.
@@ -211,7 +212,14 @@ REASONING_EFFORT=""
 case "$MODE" in
   manual)
     PROMPT_FILE="$SCRIPT_DIR/fresheyes-prompt.md"
-    REASONING_EFFORT="xhigh"
+    REASONING_EFFORT="${FRESHEYES_REASONING:-xhigh}"
+    case "$REASONING_EFFORT" in
+      low|medium|high|xhigh) ;;
+      *)
+        echo "Error: FRESHEYES_REASONING must be one of low, medium, high, xhigh (got '$REASONING_EFFORT')." >&2
+        exit 1
+        ;;
+    esac
     ;;
   automatic)
     PROMPT_FILE="$SCRIPT_DIR/fresheyes-automatic-prompt.md"
@@ -562,11 +570,26 @@ echo "Fresh Eyes [$$]: review starting. This may take up to 30 minutes, please w
 CLAUDE_TOOLS='Bash(git diff:*,git show:*,git log:*,git status:*),Read,Glob,Grep'
 CLAUDE_STREAM_PARSER="$SCRIPT_DIR/fresheyes-claude-stream.py"
 
+# FRESHEYES_CODEX_IGNORE_USER_CONFIG=1 launches the Codex reviewer with
+# --ignore-user-config: no hooks, plugins, service tier or model overrides from
+# the caller's config.toml reach the review, and the prompt carries less
+# preamble on every call. Off by default because config.toml is also where a
+# custom model provider or trust settings live.
+# Codex also reads extra prompt text from stdin whenever stdin is not a TTY, and
+# blocks until EOF. The prompt is an argument here, so both launches get
+# </dev/null: a caller with an open, silent stdin (a background job, a
+# supervisor's pipe) would otherwise hang the review before its first call.
+CODEX_USER_CONFIG_FLAG=""
+if [[ "${FRESHEYES_CODEX_IGNORE_USER_CONFIG:-0}" == "1" ]]; then
+  CODEX_USER_CONFIG_FLAG="--ignore-user-config"
+fi
+
 run_gpt_manual() {
   # --skip-git-repo-check: codex exec aborts when its working directory is not
   # inside a git repo. Reviews run read-only and the scope names its own repo
   # (often via `git -C`), so the caller's CWD must not gate the review.
   if ! "$CODEX_BIN" exec \
+    $CODEX_USER_CONFIG_FLAG \
     --sandbox read-only \
     --skip-git-repo-check \
     --color never \
@@ -574,7 +597,7 @@ run_gpt_manual() {
     -c features.shell_snapshot=false \
     -c model_reasoning_effort="$REASONING_EFFORT" \
     -o "$RESULT_FILE" \
-    "$PROMPT" 2>&1 | tee "$LOG_FILE" > /dev/null; then
+    "$PROMPT" </dev/null 2>&1 | tee "$LOG_FILE" > /dev/null; then
     echo "Fresh Eyes: $PROVIDER_LABEL failed. See log: $LOG_FILE" >&2
     exit 1
   fi
@@ -589,6 +612,7 @@ run_gpt_automatic() {
   local output_file="$1"
   # Codex writes schema-conforming JSON directly to the output file — no post-processing needed.
   if ! "$CODEX_BIN" exec \
+    $CODEX_USER_CONFIG_FLAG \
     --sandbox read-only \
     --skip-git-repo-check \
     --color never \
@@ -597,7 +621,7 @@ run_gpt_automatic() {
     --output-schema "$SCHEMA_FILE" \
     -o "$output_file" \
     -c model_reasoning_effort="$REASONING_EFFORT" \
-    "$PROMPT" 2>&1 | tee "$LOG_FILE" > /dev/null; then
+    "$PROMPT" </dev/null 2>&1 | tee "$LOG_FILE" > /dev/null; then
     echo "Fresh Eyes: $PROVIDER_LABEL failed. Commit blocked." >&2
     echo "Full log: $LOG_FILE" >&2
     exit 1
