@@ -105,6 +105,86 @@ raise SystemExit(0 if supported else 1)
 PY
 }
 
+# A `--version` probe must answer or fail; it must never hang. This check runs
+# before $GLOBAL_LOG_DIR exists and before a handle is minted, so a probe that
+# blocks forever leaves the caller with no FRESHPID, no tracker and an empty
+# output file — indistinguishable from a slow launch. Seen 2026-09-16 on macOS
+# 26.6.2: a wedged Gatekeeper evaluation (syspolicyd) slept `codex --version`
+# in the kernel before dyld ran, so nothing in the exec path ever returned.
+# Written as a watchdog rather than timeout(1), which is coreutils and is not
+# present on a stock macOS.
+VERSION_PROBE_TIMEOUT="${FRESHEYES_VERSION_PROBE_TIMEOUT:-20}"
+if [[ ! "$VERSION_PROBE_TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
+  echo "Error: FRESHEYES_VERSION_PROBE_TIMEOUT must be a positive whole number of seconds (got '$VERSION_PROBE_TIMEOUT')." >&2
+  exit 1
+fi
+
+probe_version() {
+  # Runs "$@" with stdin closed, prints its combined output, and returns its
+  # exit status — or 124, like timeout(1), when it did not answer in time.
+  # The watchdog signals the probe process itself, which is all a `--version`
+  # launch is; a wrapper that execs its real binary keeps the same pid, so the
+  # one it kills is the one that is stuck. A wrapper that forks instead would
+  # leave its child behind — harmless for a probe, and the launch still fails
+  # instead of hanging. The one case this cannot bound is a probe wedged in an
+  # uninterruptible kernel wait, where even SIGKILL does not land; the macOS
+  # Gatekeeper sleep that prompted this is interruptible, and timeout(1)
+  # returned 124 against it. One more limit: if the caller started fresheyes
+  # with SIGTERM ignored, bash cannot trap it, so the watchdog outlives its
+  # cancellation and every fast probe costs the full limit — slow, never stuck.
+  # Both temp files live in a private directory: the marker decides the verdict,
+  # so a predictable name in shared /tmp would let anyone forge one.
+  local probe_dir out_file timeout_marker probe_pid watchdog_pid status=0
+  if ! probe_dir="$(mktemp -d "${TMPDIR:-/tmp}/fresheyes-version.XXXXXX")"; then
+    echo "Error: could not create a temporary directory for the version probe." >&2
+    return 1
+  fi
+  out_file="$probe_dir/output"
+  timeout_marker="$probe_dir/timeout"
+
+  "$@" </dev/null >"$out_file" 2>&1 &
+  probe_pid=$!
+  # The watchdog waits on a `sleep` it can hand back: killing a subshell does not
+  # kill the `sleep` it is blocked in, and a stray `sleep` per launch would
+  # outlive every fast probe.
+  (
+    nap_pid=""
+    trap 'kill -TERM "$nap_pid" 2>/dev/null; exit 0' TERM
+    sleep "$VERSION_PROBE_TIMEOUT" & nap_pid=$!
+    wait "$nap_pid" 2>/dev/null || exit 0
+    # Never let a failed marker write (a full or over-quota $TMPDIR) exit this
+    # subshell before the kill: the whole point is that the probe gets bounded.
+    # Without the marker the parent reports "unable to determine the version"
+    # rather than the hang, which is a worse message but not a hang.
+    : > "$timeout_marker" || true
+    kill -TERM "$probe_pid" 2>/dev/null || true
+    sleep 2 & nap_pid=$!
+    wait "$nap_pid" 2>/dev/null || exit 0
+    kill -KILL "$probe_pid" 2>/dev/null || true
+  ) >/dev/null 2>&1 &
+  watchdog_pid=$!
+
+  wait "$probe_pid" || status=$?
+  kill -TERM "$watchdog_pid" 2>/dev/null || true
+  wait "$watchdog_pid" 2>/dev/null || true
+
+  cat "$out_file"
+  # The marker decides, tempered by one thing the probe can still prove: an
+  # answer. If the marker is there and the probe either failed or printed
+  # nothing, it outlived the limit — whether it died on the signal, or handled
+  # it and exited 0 without saying anything. A probe that answered just as the
+  # marker landed did answer, and its output is worth more than the clock.
+  # Without a marker, a probe that chose 124 for its own reasons must not read
+  # back as our timeout.
+  if [[ -e "$timeout_marker" && ( "$status" -ne 0 || ! -s "$out_file" ) ]]; then
+    status=124
+  elif [[ "$status" -eq 124 ]]; then
+    status=1
+  fi
+  rm -rf "$probe_dir"
+  return "$status"
+}
+
 # --- CLI prerequisite check ---
 if [[ "$PROVIDER" == "gpt" ]]; then
   if [[ "${FRESHEYES_DAEMONIZED:-0}" == "1" && -n "${FRESHEYES_CODEX_BIN:-}" ]]; then
@@ -128,7 +208,17 @@ if [[ "$PROVIDER" == "gpt" ]]; then
       gpt-5.6*) MINIMUM_CODEX_VERSION="0.144.0"; CODEX_MODEL_FAMILY="GPT-5.6" ;;
     esac
     if [[ -n "$MINIMUM_CODEX_VERSION" ]]; then
-      if ! CODEX_VERSION_OUTPUT="$(codex --version 2>&1)"; then
+      CODEX_VERSION_STATUS=0
+      CODEX_VERSION_OUTPUT="$(probe_version codex --version)" || CODEX_VERSION_STATUS=$?
+      if [[ "$CODEX_VERSION_STATUS" -eq 124 ]]; then
+        echo "Error: 'codex --version' did not answer within ${VERSION_PROBE_TIMEOUT}s." >&2
+        echo "The CLI is installed but did not respond. Raise the limit with" >&2
+        echo "FRESHEYES_VERSION_PROBE_TIMEOUT if the host is merely slow. One known cause" >&2
+        echo "on macOS is a wedged Gatekeeper evaluation, which blocks exec before the" >&2
+        echo "binary runs; 'sudo killall syspolicyd' clears that one." >&2
+        exit 1
+      fi
+      if [[ "$CODEX_VERSION_STATUS" -ne 0 ]]; then
         echo "Error: unable to determine the Codex CLI version." >&2
         echo "Update it with: npm install -g @openai/codex@latest" >&2
         exit 1
@@ -170,7 +260,17 @@ elif [[ "$PROVIDER" == "claude" ]]; then
       claude-fable-5*)   MINIMUM_CLAUDE_VERSION="2.1.170"; CLAUDE_MODEL_FAMILY="Claude Fable 5" ;;
     esac
     if [[ -n "$MINIMUM_CLAUDE_VERSION" ]]; then
-      if ! CLAUDE_VERSION_OUTPUT="$(claude --version 2>&1)"; then
+      CLAUDE_VERSION_STATUS=0
+      CLAUDE_VERSION_OUTPUT="$(probe_version claude --version)" || CLAUDE_VERSION_STATUS=$?
+      if [[ "$CLAUDE_VERSION_STATUS" -eq 124 ]]; then
+        echo "Error: 'claude --version' did not answer within ${VERSION_PROBE_TIMEOUT}s." >&2
+        echo "The CLI is installed but did not respond. Raise the limit with" >&2
+        echo "FRESHEYES_VERSION_PROBE_TIMEOUT if the host is merely slow. One known cause" >&2
+        echo "on macOS is a wedged Gatekeeper evaluation, which blocks exec before the" >&2
+        echo "binary runs; 'sudo killall syspolicyd' clears that one." >&2
+        exit 1
+      fi
+      if [[ "$CLAUDE_VERSION_STATUS" -ne 0 ]]; then
         echo "Error: unable to determine the Claude Code version." >&2
         echo "Update it with: npm install -g @anthropic-ai/claude-code@latest" >&2
         exit 1
@@ -380,7 +480,7 @@ launch_via_systemd_run() {
   for var in FRESHEYES_LOG_DIR FRESHEYES_GLOBAL_LOG_DIR FRESHEYES_MODE \
              FRESHEYES_PROVIDER FRESHEYES_GPT_MODEL FRESHEYES_CLAUDE_MODEL \
              FRESHEYES_MODEL FRESHEYES_CODEX_BIN FRESHEYES_CLAUDE_BIN \
-             FRESHEYES_HEARTBEAT_SECS TMPDIR \
+             FRESHEYES_HEARTBEAT_SECS FRESHEYES_VERSION_PROBE_TIMEOUT TMPDIR \
              HTTP_PROXY HTTPS_PROXY NO_PROXY http_proxy https_proxy no_proxy \
              ALL_PROXY SSL_CERT_FILE SSL_CERT_DIR REQUESTS_CA_BUNDLE \
              NODE_EXTRA_CA_CERTS CURL_CA_BUNDLE \
