@@ -290,11 +290,15 @@ _find_legacy_base() {
 
 line_count_or_zero() {
   local base="$1"
+  local count=""
   if [[ -f "$base" ]]; then
-    wc -l < "$base"
-  else
-    printf '0\n'
+    # BSD `wc` pads its count with leading spaces. This value is printed as
+    # the legacy numeric progress output and interpolated into the running
+    # status line as `final_lines=<n>`, so the padding would reach callers
+    # that parse either. Strip it so both platforms emit the bare number.
+    count=$(wc -l < "$base" | tr -d '[:space:]')
   fi
+  printf '%s\n' "${count:-0}"
 }
 
 # The file that IS the run's result. This is upstream's selection, unchanged:
