@@ -896,8 +896,7 @@ run_claude_manual() {
   # already printed.
   set +e
   env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_ENTRYPOINT \
-    -u FRESHEYES_HANDLE -u FRESHEYES_LOG_FILE \
-    GIT_OPTIONAL_LOCKS=0 "$CLAUDE_BIN" -p \
+    -u FRESHEYES_HANDLE -u FRESHEYES_LOG_FILE GIT_OPTIONAL_LOCKS=0 "$CLAUDE_BIN" -p \
     --model "$MODEL" \
     --effort "$REASONING_EFFORT" \
     --output-format stream-json \
@@ -952,8 +951,7 @@ run_claude_automatic() {
   # a handle failure and throw away the diagnostic that says what went wrong.
   set +e
   env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_ENTRYPOINT \
-    -u FRESHEYES_HANDLE -u FRESHEYES_LOG_FILE \
-    GIT_OPTIONAL_LOCKS=0 "$CLAUDE_BIN" -p \
+    -u FRESHEYES_HANDLE -u FRESHEYES_LOG_FILE GIT_OPTIONAL_LOCKS=0 "$CLAUDE_BIN" -p \
     --model "$MODEL" \
     --effort "$REASONING_EFFORT" \
     --output-format stream-json \
