@@ -3,7 +3,17 @@
 `Joi/fresheyes` is the fork of `danshapiro/fresheyes` that Joi's machines run.
 Joi decided on 2026-09-21 to maintain it (kata jibot-code#samy): fresheyes is
 the required review before every repoman handoff, and several open upstream
-issues are defects in that review.
+issues were defects in that review.
+
+On 2026-09-22 Dan merged all eight of the fork's pull requests (#4, #14, #17,
+#20, #21, #22, #23, #25) and added an MIT LICENSE (#26). Since
+`fleet-2026.09.24` the integration branch is `upstream/main` plus one fleet
+patch, `fix/sol-review-default`, and the docs under `docs/`. The merge had one
+conflict, in `fresheyes.sh`, where Dan had rewrapped the `env -u` line of the
+two Claude launches; it took upstream's wrapping. `git diff upstream/main --
+skills tests` at that tag is the Sol default and its tests, nothing else, so
+it was tested on macOS only: Linux had passed the same code under `upstream/main`
+and the fix branches.
 
 This file exists only on the integration branch. It is not offered upstream.
 
@@ -31,9 +41,10 @@ reads `upstream` as a refspec and fails.
 2. Every fix is its own small branch cut from `upstream/main`, with its own
    pull request against `danshapiro/fresheyes` `main`. The same branch is then
    merged into the integration branch. When Dan pushes, rebase the fix branch.
-3. The fork is for fleet use only until a LICENSE lands upstream (kata
-   jibot-code#psha). Do not redistribute it and do not put it in the
-   mujin-public path.
+3. Satisfied: upstream is MIT-licensed since pull request #26 (2026-09-22,
+   kata jibot-code#psha); tags from `fleet-2026.09.24` on carry `LICENSE`. The fleet-only
+   restriction that held until then no longer applies; anything redistributed
+   keeps the licence file.
 4. It is not a rename and not a rewrite. The diff from upstream stays small
    enough that Dan can take every piece of it.
 
@@ -63,7 +74,8 @@ integration branch; do not open a pull request from it as it stands.
 The Claude reviewer default is upstream's, `claude-fable-5-1`.
 
 Since `fleet-2026.09.22` a review result is bound to the run that produced it
-(`fix/result-handle-binding`, upstream pull request 25, kata jibot-code#we92): the
+(`fix/result-handle-binding`, upstream pull request 25, merged 2026-09-22, kata
+jibot-code#we92): the
 prompt carries the run's handle and asks for it back as a `FRESHEYES-RUN:` line —
 `run_handle` in automatic mode — and both the runner and `fresheyes-progress.sh`
 refuse a result carrying a DIFFERENT run's marker (state `handle_mismatch`, exit 6,
@@ -77,7 +89,7 @@ there and is open: jibot-code#w7ts, a `.locator` repointed out of the log direct
 `..` or a symlink, which `--result` then prints as the review — it predates the fork.
 
 Since `fleet-2026.09.21.3` the Claude reviewer runs read-only
-(`fix/claude-reviewer-read-only`, upstream pull request 23): no bypass flag,
+(`fix/claude-reviewer-read-only`, upstream pull request 23, merged 2026-09-22): no bypass flag,
 only Bash/Read/Glob/Grep, only the four git read commands pre-approved, and no
 user settings, hooks, plugins, MCP servers or repo `CLAUDE.md` loaded. It needs
 a logged-in CLI: `apiKeyHelper` or an `env` block in `settings.json` is ignored.
@@ -107,8 +119,9 @@ git push origin HEAD:refs/heads/feat/fleet-snapshot    # must be a fast-forward
 
 Merge the branch; do not cherry-pick its commits. A cherry-pick puts the change
 on the integration branch under new hashes, so git can no longer say which fix
-branches are in it. `fix/version-probe-timeout` is in that state today: its
-four commits are on the integration branch under different hashes.
+branches are in it. `fix/version-probe-timeout` was in that state until Dan
+merged its pull request (#17); since `fleet-2026.09.24` the question no longer
+matters for it.
 
 The fix tasks mostly edit `skills/fresheyes/fresheyes.sh`, so do them one at a
 time.
@@ -158,7 +171,9 @@ and start no real review.
 Never run `fresheyes.sh --help`, or any flag it does not know: it takes the
 flag as the review scope and launches a real review (upstream #6).
 
-All eight files pass on macOS as of 2026-09-22 (the eighth is
+All eight files pass on macOS as of 2026-09-24, on the merge of upstream
+that became `fleet-2026.09.24` (macct: macOS 26.6.2, `/bin/bash` 3.2.57,
+Homebrew `setsid`). They passed as of 2026-09-22 too (the eighth is
 `fresheyes-handle-binding-test.sh`, added by jibot-code#we92). Seven passed as of
 2026-09-21 (macct: macOS 26.6.2,
 `/bin/bash` 3.2.57, Homebrew `setsid` installed). Getting there took five
