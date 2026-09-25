@@ -67,18 +67,34 @@ for args in "--version" "-x" "--gpt --verbose review HEAD" "review --bogus"; do
   assert_nothing_launched "'$args'"
 done
 
-for scope in "" "   "; do
-  run_runner --claude "$scope"
-  [[ "$STATUS" -eq 2 ]] || fail "scope '$scope': exit $STATUS, want 2: $OUT"
-  [[ "$OUT" == *"scope text is empty"* ]] || fail "scope '$scope': no empty-scope error: $OUT"
-  assert_nothing_launched "scope '$scope'"
-done
+assert_blank_refused() {
+  local label="$1"
+  shift
+  run_runner --claude "$@"
+  [[ "$STATUS" -eq 2 ]] || fail "$label: exit $STATUS, want 2: $OUT"
+  [[ "$OUT" == *"scope text is empty"* ]] || fail "$label: no empty-scope error: $OUT"
+  assert_nothing_launched "$label"
+}
+assert_blank_refused "one empty scope" ""
+assert_blank_refused "one blank scope" "   "
+# Joining several blank arguments inserts a space; that is still blank.
+assert_blank_refused "two empty scopes" "" ""
+assert_blank_refused "two blank scopes after --" -- " " " "
 
-# After '--', a leading dash is scope text, so the run gets past argument
-# parsing to the provider's version check (the fake CLI fails it).
+# After '--', a leading dash is scope text, and it reaches the reviewer's
+# prompt verbatim. A fake claude that passes the version check records the
+# prompt (its last argument) and then fails the run.
+cat > "$FAKE_BIN/claude" <<SH
+#!/usr/bin/env bash
+if [[ "\$*" == "--version" ]]; then echo "9.9.9 (Claude Code)"; exit 0; fi
+printf '%s' "\${@: -1}" > "$TEST_TMP/prompt"
+exit 1
+SH
 run_runner --claude --foreground -- '--help is the scope'
 [[ "$OUT" != *"unknown option"* && "$OUT" != *Usage:* ]] \
   || fail "'-- --help ...' was parsed as an option: $OUT"
-[[ -e "$CALLS" ]] || fail "'-- --help ...' never reached the provider: $OUT"
+[[ -f "$TEST_TMP/prompt" ]] || fail "'-- --help ...' never reached the reviewer: $OUT"
+grep -qF -- '--help is the scope' "$TEST_TMP/prompt" \
+  || fail "the prompt does not carry the scope: $(cat "$TEST_TMP/prompt")"
 
 echo "PASS: fresheyes argv"

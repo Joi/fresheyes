@@ -37,8 +37,9 @@ prints FRESHPID=<id>; --foreground (alias --no-detach) runs synchronously.
   -h, --help                               print this help and exit; launches nothing
   --                                       everything after is scope text, even if it starts with '-'
 
-With no scope text, the staged changes are reviewed. An unrecognized option
-is an error and launches nothing.
+With no scope text, the staged changes are reviewed; in manual mode, when
+nothing is staged, the most recent commit is reviewed instead. An
+unrecognized option or an empty scope is an error and launches nothing.
 USAGE
 }
 
@@ -107,7 +108,10 @@ done
 
 # An explicit scope that is empty or only whitespace would launch a review of
 # nothing in particular; refuse it rather than fall back to the staged default.
-if [[ ${#SCOPE_PARTS[@]} -gt 0 && -z "${SCOPE_PARTS[*]//[[:space:]]/}" ]]; then
+# Join first: the substitution runs per element, and "${arr[*]}" would then
+# put a space between two blank arguments.
+SCOPE_JOINED="${SCOPE_PARTS[*]-}"
+if [[ ${#SCOPE_PARTS[@]} -gt 0 && -z "${SCOPE_JOINED//[[:space:]]/}" ]]; then
   echo "Error: the scope text is empty. Nothing was launched." >&2
   usage >&2
   exit 2
