@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Fresh Eyes - Independent Code Review runner
-# Usage: ./fresheyes.sh [--gpt|--claude|--provider PROVIDER] [--manual|--automatic] [--foreground] 'scope text'
+# Usage: ./fresheyes.sh [--gpt|--claude|--provider PROVIDER] [--manual|--automatic] [--foreground] [--] 'scope text'  (-h for help)
 # Manual mode detaches into its own session by default (prints FRESHPID=<pid>); --foreground runs synchronously.
 
 set -euo pipefail
@@ -22,6 +22,25 @@ FOREGROUND=0
 # Capture argv verbatim before the parse loop consumes it, so the detach re-exec
 # can relaunch with identical arguments.
 ORIG_ARGS=("$@")
+
+usage() {
+  cat <<'USAGE'
+Usage: fresheyes.sh [--gpt|--claude|--provider PROVIDER] [--manual|--automatic|--mode MODE]
+                    [--foreground] [--] ['scope text' ...]
+
+Launches an independent code review. Manual mode detaches by default and
+prints FRESHPID=<id>; --foreground (alias --no-detach) runs synchronously.
+
+  --gpt, --claude, --provider gpt|claude   reviewer (default: $FRESHEYES_PROVIDER or gpt)
+  --manual, --automatic, --mode MODE       review mode (default: manual)
+  --foreground, --no-detach                run in the foreground
+  -h, --help                               print this help and exit; launches nothing
+  --                                       everything after is scope text, even if it starts with '-'
+
+With no scope text, the staged changes are reviewed. An unrecognized option
+is an error and launches nothing.
+USAGE
+}
 
 # --- Argument parsing ---
 while [[ $# -gt 0 ]]; do
@@ -62,10 +81,22 @@ while [[ $# -gt 0 ]]; do
       FOREGROUND=1
       shift
       ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
     --)
       shift
       SCOPE_PARTS+=("$@")
       break
+      ;;
+    -*)
+      # A probe like `fresheyes.sh --version` used to launch a real review
+      # with the flag as its scope (jibot-code#ryf1). Scope text that really
+      # starts with '-' goes after '--'.
+      echo "Error: unknown option '$1'. Nothing was launched." >&2
+      usage >&2
+      exit 2
       ;;
     *)
       SCOPE_PARTS+=("$1")
@@ -73,6 +104,14 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+# An explicit scope that is empty or only whitespace would launch a review of
+# nothing in particular; refuse it rather than fall back to the staged default.
+if [[ ${#SCOPE_PARTS[@]} -gt 0 && -z "${SCOPE_PARTS[*]//[[:space:]]/}" ]]; then
+  echo "Error: the scope text is empty. Nothing was launched." >&2
+  usage >&2
+  exit 2
+fi
 
 # --- Resolve provider ---
 PROVIDER="${PROVIDER:-${FRESHEYES_PROVIDER:-gpt}}"
