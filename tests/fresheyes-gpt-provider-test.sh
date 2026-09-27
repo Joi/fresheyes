@@ -94,8 +94,8 @@ with open(sys.argv[1], encoding="utf-8") as handle:
 
 model_index = argv.index("--model")
 actual_model = argv[model_index + 1]
-if actual_model != "gpt-6-astra":
-    raise SystemExit(f"expected default GPT model gpt-6-astra, got {actual_model!r}")
+if actual_model != "gpt-6-sol":
+    raise SystemExit(f"expected default GPT model gpt-6-sol, got {actual_model!r}")
 
 if "model_reasoning_effort=xhigh" not in argv:
     raise SystemExit(f"manual GPT review did not use xhigh reasoning: {argv!r}")
@@ -177,7 +177,7 @@ import sys
 with open(sys.argv[1], encoding="utf-8") as handle:
     argv = json.load(handle)
 model_index = argv.index("--model")
-if argv[model_index + 1] != "gpt-6-astra":
+if argv[model_index + 1] != "gpt-6-sol":
     raise SystemExit(f"boundary-version run did not use the default model: {argv!r}")
 PY
 
@@ -287,8 +287,8 @@ with open(sys.argv[1], encoding="utf-8") as handle:
 
 model_index = argv.index("--model")
 actual_model = argv[model_index + 1]
-if actual_model != "gpt-6-astra":
-    raise SystemExit(f"expected automatic GPT model gpt-6-astra, got {actual_model!r}")
+if actual_model != "gpt-6-sol":
+    raise SystemExit(f"expected automatic GPT model gpt-6-sol, got {actual_model!r}")
 if "model_reasoning_effort=medium" not in argv:
     raise SystemExit(f"automatic GPT review did not use medium reasoning: {argv!r}")
 if "--output-schema" not in argv or "-o" not in argv:

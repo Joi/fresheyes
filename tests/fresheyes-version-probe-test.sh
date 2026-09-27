@@ -63,7 +63,7 @@ PY
 }
 
 write_fake codex "codex-cli 0.153.4"
-write_fake claude "2.1.257 (Claude Code)"
+write_fake claude "2.1.283 (Claude Code)"
 
 # Runs the launcher and echoes "<status> <elapsed-seconds>"; the caller asserts.
 # The outer timeout is the regression guard: without the watchdog in the runner

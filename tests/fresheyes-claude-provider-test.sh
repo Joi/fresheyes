@@ -50,8 +50,8 @@ if sys.argv[1:] == ["--version"]:
     probe = os.environ.get("FRESHEYES_FAKE_CLAUDE_VERSION_PROBE")
     if probe:
         with open(probe, "w", encoding="utf-8") as handle:
-            handle.write(os.environ.get("FRESHEYES_FAKE_CLAUDE_VERSION", "2.1.261"))
-    print(f"{os.environ.get('FRESHEYES_FAKE_CLAUDE_VERSION', '2.1.261')} (Claude Code)")
+            handle.write(os.environ.get("FRESHEYES_FAKE_CLAUDE_VERSION", "2.1.283"))
+    print(f"{os.environ.get('FRESHEYES_FAKE_CLAUDE_VERSION', '2.1.283')} (Claude Code)")
     raise SystemExit(0)
 
 argv_file = os.environ["FRESHEYES_FAKE_ARGV"]
@@ -212,8 +212,8 @@ for value in ["--verbose", "--include-partial-messages", "--disable-slash-comman
 if "--bare" in argv:
     raise SystemExit(f"unexpected --bare: {argv!r}")
 model_idx = argv.index("--model")
-if model_idx + 1 >= len(argv) or argv[model_idx + 1] != "claude-fable-5-1":
-    raise SystemExit(f"manual Claude review did not use Fable 5.1: {argv!r}")
+if model_idx + 1 >= len(argv) or argv[model_idx + 1] != "claude-opus-5-5":
+    raise SystemExit(f"manual Claude review did not use Opus 5.5: {argv!r}")
 effort_idx = argv.index("--effort")
 if effort_idx + 1 >= len(argv) or argv[effort_idx + 1] != "xhigh":
     raise SystemExit(f"manual Claude review did not use xhigh effort: {argv!r}")
@@ -243,8 +243,8 @@ for value in [
 if "--bare" in argv:
     raise SystemExit(f"unexpected --bare: {argv!r}")
 model_idx = argv.index("--model")
-if model_idx + 1 >= len(argv) or argv[model_idx + 1] != "claude-fable-5-1":
-    raise SystemExit(f"automatic Claude review did not use Fable 5.1: {argv!r}")
+if model_idx + 1 >= len(argv) or argv[model_idx + 1] != "claude-opus-5-5":
+    raise SystemExit(f"automatic Claude review did not use Opus 5.5: {argv!r}")
 effort_idx = argv.index("--effort")
 if effort_idx + 1 >= len(argv) or argv[effort_idx + 1] != "medium":
     raise SystemExit(f"automatic Claude review did not use medium effort: {argv!r}")
@@ -333,7 +333,7 @@ test_manual_claude_invocation_uses_streaming_flags() {
 
   assert_manual_argv
   assert_restricted_argv
-  [[ -s "$VERSION_PROBE_FILE" ]] || fail "Fable 5.1 review did not verify the Claude Code version"
+  [[ -s "$VERSION_PROBE_FILE" ]] || fail "Opus 5.5 review did not verify the Claude Code version"
   assert_contains "$output" "INDEPENDENT CODE REVIEW PASSED" "manual Claude output"
   assert_contains "$output" "- README.md" "manual Claude output preserves the first files list"
   log_file=$(read_latest_file "$run_tmp" 'fresheyes-*.log')
@@ -542,7 +542,72 @@ test_automatic_mode_does_not_detach() {
   fi
 }
 
-test_fable_5_1_rejects_old_claude_code() {
+test_opus_5_5_rejects_old_claude_code() {
+  local run_tmp stdout_file stderr_file status
+  run_tmp="$(mktemp -d "$TEST_TMP/old-claude-opus.XXXXXX")"
+  stdout_file="$run_tmp/stdout.txt"
+  stderr_file="$run_tmp/stderr.txt"
+  rm -f "$ARGV_FILE" "$ARGV_FILE.env"
+
+  # 2.1.279 sits between the two gates: fine for a Fable 5.1 override, too old
+  # for the Opus 5.5 default.
+  set +e
+  TMPDIR="$run_tmp" \
+    FRESHEYES_LOG_DIR="$run_tmp/fresheyes-logs" \
+    FRESHEYES_GLOBAL_LOG_DIR="$run_tmp/global-fresheyes-logs" \
+    FRESHEYES_CLAUDE_MODEL= \
+    FRESHEYES_MODEL= \
+    FRESHEYES_REASONING= \
+    FRESHEYES_CODEX_IGNORE_USER_CONFIG= \
+    FRESHEYES_FAKE_CLAUDE_VERSION="2.1.279" \
+    FRESHEYES_FAKE_CLAUDE_VERSION_PROBE="$VERSION_PROBE_FILE" \
+    PATH="$FAKE_BIN:$PATH" \
+    FRESHEYES_FAKE_ARGV="$ARGV_FILE" \
+    timeout 30s bash "$RUNNER" --foreground --claude "Review README.md." > "$stdout_file" 2> "$stderr_file"
+  status=$?
+  set -e
+
+  [[ "$status" -ne 0 ]] || fail "Opus 5.5 accepted unsupported Claude Code 2.1.279"
+  assert_contains "$(cat "$stderr_file")" "Claude Opus 5.5 requires Claude Code 2.1.280 or newer" "old Claude Code failure"
+}
+
+test_opus_5_5_accepts_exact_minimum() {
+  local run_tmp stdout_file stderr_file
+  run_tmp="$(mktemp -d "$TEST_TMP/boundary-opus.XXXXXX")"
+  stdout_file="$run_tmp/stdout.txt"
+  stderr_file="$run_tmp/stderr.txt"
+  rm -f "$ARGV_FILE" "$ARGV_FILE.env"
+
+  # Exact-boundary acceptance: the new minimum itself must pass (pins
+  # version_at_least and the floor constant against off-by-one).
+  if ! TMPDIR="$run_tmp" \
+    FRESHEYES_LOG_DIR="$run_tmp/fresheyes-logs" \
+    FRESHEYES_GLOBAL_LOG_DIR="$run_tmp/global-fresheyes-logs" \
+    FRESHEYES_CLAUDE_MODEL= \
+    FRESHEYES_MODEL= \
+    FRESHEYES_REASONING= \
+    FRESHEYES_CODEX_IGNORE_USER_CONFIG= \
+    FRESHEYES_FAKE_CLAUDE_VERSION="2.1.280" \
+    FRESHEYES_FAKE_CLAUDE_VERSION_PROBE="$VERSION_PROBE_FILE" \
+    PATH="$FAKE_BIN:$PATH" \
+    FRESHEYES_FAKE_ARGV="$ARGV_FILE" \
+    timeout 30s bash "$RUNNER" --foreground --claude "Review README.md." > "$stdout_file" 2> "$stderr_file"; then
+    printf 'Opus 5.5 rejected its exact minimum Claude Code 2.1.280. stderr:\n' >&2
+    cat "$stderr_file" >&2
+    exit 1
+  fi
+  "$PYTHON" - "$ARGV_FILE" <<'PY'
+import json
+import sys
+
+argv = json.load(open(sys.argv[1], encoding="utf-8"))
+model_idx = argv.index("--model")
+if argv[model_idx + 1] != "claude-opus-5-5":
+    raise SystemExit(f"boundary-version run did not use the default model: {argv!r}")
+PY
+}
+
+test_fable_5_1_override_rejects_old_claude_code() {
   local run_tmp stdout_file stderr_file status
   run_tmp="$(mktemp -d "$TEST_TMP/old-claude.XXXXXX")"
   stdout_file="$run_tmp/stdout.txt"
@@ -550,12 +615,12 @@ test_fable_5_1_rejects_old_claude_code() {
   rm -f "$ARGV_FILE" "$ARGV_FILE.env"
 
   # 2.1.256 sits between the two gates: fine for a Fable 5 override, too old
-  # for the Fable 5.1 default.
+  # for a Fable 5.1 override.
   set +e
   TMPDIR="$run_tmp" \
     FRESHEYES_LOG_DIR="$run_tmp/fresheyes-logs" \
     FRESHEYES_GLOBAL_LOG_DIR="$run_tmp/global-fresheyes-logs" \
-    FRESHEYES_CLAUDE_MODEL= \
+    FRESHEYES_CLAUDE_MODEL="claude-fable-5-1" \
     FRESHEYES_MODEL= \
     FRESHEYES_REASONING= \
     FRESHEYES_CODEX_IGNORE_USER_CONFIG= \
@@ -571,7 +636,7 @@ test_fable_5_1_rejects_old_claude_code() {
   assert_contains "$(cat "$stderr_file")" "Claude Fable 5.1 requires Claude Code 2.1.257 or newer" "old Claude Code failure"
 }
 
-test_fable_5_1_accepts_exact_minimum() {
+test_fable_5_1_override_accepts_exact_minimum() {
   local run_tmp stdout_file stderr_file
   run_tmp="$(mktemp -d "$TEST_TMP/boundary.XXXXXX")"
   stdout_file="$run_tmp/stdout.txt"
@@ -583,7 +648,7 @@ test_fable_5_1_accepts_exact_minimum() {
   if ! TMPDIR="$run_tmp" \
     FRESHEYES_LOG_DIR="$run_tmp/fresheyes-logs" \
     FRESHEYES_GLOBAL_LOG_DIR="$run_tmp/global-fresheyes-logs" \
-    FRESHEYES_CLAUDE_MODEL= \
+    FRESHEYES_CLAUDE_MODEL="claude-fable-5-1" \
     FRESHEYES_MODEL= \
     FRESHEYES_REASONING= \
     FRESHEYES_CODEX_IGNORE_USER_CONFIG= \
@@ -603,7 +668,7 @@ import sys
 argv = json.load(open(sys.argv[1], encoding="utf-8"))
 model_idx = argv.index("--model")
 if argv[model_idx + 1] != "claude-fable-5-1":
-    raise SystemExit(f"boundary-version run did not use the default model: {argv!r}")
+    raise SystemExit(f"boundary-version run did not use the Fable 5.1 override: {argv!r}")
 PY
 }
 
@@ -732,9 +797,11 @@ test_parser_missing_result_writes_failure_log
 test_manual_detaches_by_default_and_completes
 test_manual_foreground_runs_synchronously
 test_automatic_mode_does_not_detach
-test_fable_5_1_rejects_old_claude_code
+test_opus_5_5_rejects_old_claude_code
+test_fable_5_1_override_rejects_old_claude_code
 test_reasoning_env_sets_claude_effort
-test_fable_5_1_accepts_exact_minimum
+test_opus_5_5_accepts_exact_minimum
+test_fable_5_1_override_accepts_exact_minimum
 test_fable_5_override_keeps_its_own_gate
 test_claude_specific_model_override_wins
 
