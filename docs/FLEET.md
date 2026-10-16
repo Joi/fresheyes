@@ -15,6 +15,15 @@ skills tests` at that tag is the Sol default and its tests, nothing else, so
 it was tested on macOS only: Linux had passed the same code under `upstream/main`
 and the fix branches.
 
+`fleet-2026.10.01` added `fix/gpt61-codex-floor` (upstream pull request #29,
+open): GPT-6.1 gets its own Codex CLI floor, 0.159.1. `fleet-2026.10.16` merges
+upstream 9997894 (Dan, 2026-09-26), which made `claude-opus-5-5` and
+`gpt-6-sol` upstream's defaults, and re-merges the fix branch after its rebase
+onto that commit (kata jibot-code#3vnz). The fork kept both of its default
+lines; see the next section. `git diff upstream/main -- skills tests` at that
+tag is the two default lines, the GPT-6.1 arm, the fork's GPT paragraph in
+`SKILL.md`, and their tests.
+
 This file exists only on the integration branch. It is not offered upstream.
 
 ## Branches
@@ -50,14 +59,21 @@ reads `upstream` as a refspec and fails.
 
 ## Where the fork differs from the README
 
-The default GPT reviewer is `gpt-5.6-sol`, not `gpt-6-astra`. Upstream made
-Astra the default in 2f8e2b3; the fork keeps Sol through
+Both default reviewer models are fleet routing, not upstream's. The source of
+truth is dotfiles-private `routing/routing.toml` `[review]`:
+`fresheyes_gpt_model` and `astra_built_reviewer_model`. Its
+`scripts/routing/routing-project` compares the two literal `MODEL="${...}"`
+lines in `fresheyes.sh` with those fields, so a merge that changes either line
+shows up as routing drift. Change `routing.toml` first, then this branch.
+
+The default GPT reviewer is `gpt-5.6-sol`, not upstream's `gpt-6-sol` (9997894;
+before that `gpt-6-astra`, 2f8e2b3). The fork keeps Sol through
 `fix/sol-review-default` because of the fleet's review cost ruling (kata
 jibot-code#g0rk). The lookup order in `skills/fresheyes/fresheyes.sh` is
 `FRESHEYES_GPT_MODEL`, then the older `FRESHEYES_MODEL`, then `gpt-5.6-sol`, so
 a Mac with neither variable set runs Sol, and a Mac that still sets
-`FRESHEYES_MODEL` runs whatever that names. The README's sentences about Astra
-being the default describe upstream, not this branch. To use Astra for one
+`FRESHEYES_MODEL` runs whatever that names. The README's sentences about the
+default models describe upstream, not this branch. To use Astra for one
 review, set the variable on that command alone, so it does not stay in the
 shell for the next review:
 
@@ -71,7 +87,14 @@ request and is the one branch outside rule 2. It was cut before
 (12a2ff2, the same change as fd5e85b). Nothing is lost by that on the
 integration branch; do not open a pull request from it as it stands.
 
-The Claude reviewer default is upstream's, `claude-fable-5-1`.
+The default Claude reviewer is `claude-fable-5-1`, not upstream's
+`claude-opus-5-5` (9997894). Routing ruling jibot-code#g0rk says an Astra-built
+change is reviewed by Fable, and a Codex executor's `/do-it` review sets only
+`FRESHEYES_PROVIDER=claude`, so this default is that reviewer's model. The
+merge of 9997894 set the line back by hand and turned upstream's two Opus 5.5
+gate tests into explicit `FRESHEYES_CLAUDE_MODEL=claude-opus-5-5` cases.
+Upstream's Opus 5.5 gate arm (Claude Code 2.1.280) is kept for callers who name
+it. Moving the fleet to Opus 5.5 is a routing question (kata jibot-code#9nbr).
 
 Since `fleet-2026.09.22` a review result is bound to the run that produced it
 (`fix/result-handle-binding`, upstream pull request 25, merged 2026-09-22, kata
@@ -171,7 +194,10 @@ and start no real review.
 Never run `fresheyes.sh --help`, or any flag it does not know: it takes the
 flag as the review scope and launches a real review (upstream #6).
 
-All eight files pass on macOS as of 2026-09-24, on the merge of upstream
+All eight files pass on macOS as of 2026-10-16, on the merges that became
+`fleet-2026.10.16` (macct: macOS 26.6.2, `/bin/bash` 3.2.57, Homebrew
+`setsid`), and on Linux (Lima, Ubuntu 24.04) against the same commit.
+All eight files passed on macOS as of 2026-09-24, on the merge of upstream
 that became `fleet-2026.09.24` (macct: macOS 26.6.2, `/bin/bash` 3.2.57,
 Homebrew `setsid`). They passed as of 2026-09-22 too (the eighth is
 `fresheyes-handle-binding-test.sh`, added by jibot-code#we92). Seven passed as of
