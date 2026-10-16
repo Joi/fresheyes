@@ -81,7 +81,7 @@ PATH="$FAKE_BIN:$PATH" \
   timeout 30s bash "$RUNNER" --foreground --gpt --manual "Review README.md." > "$STDOUT_FILE"
 
 if [[ ! -s "$VERSION_PROBE_FILE" ]]; then
-  printf 'GPT-6 review did not verify the Codex CLI version\n' >&2
+  printf 'default GPT review did not verify the Codex CLI version\n' >&2
   exit 1
 fi
 
@@ -249,8 +249,8 @@ if actual_model != "gpt-5.6-terra":
     raise SystemExit(f"expected GPT-specific model override to win, got {actual_model!r}")
 PY
 
-# A GPT-5.6 override keeps its own (older) minimum: 0.145.0 is too old for the
-# GPT-6 default but fine for Terra.
+# A GPT-5.6 override keeps its own (older) minimum: 0.145.0 is too old for a
+# GPT-6 model but fine for Terra.
 TERRA_OLD_CLI_ARGV_FILE="$TEST_TMP/codex-terra-old-cli-argv.json"
 PATH="$FAKE_BIN:$PATH" \
   FRESHEYES_FAKE_ARGV="$TERRA_OLD_CLI_ARGV_FILE" \

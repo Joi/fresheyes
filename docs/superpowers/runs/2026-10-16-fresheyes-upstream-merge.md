@@ -22,6 +22,15 @@ Pass 2 [spec]: 0B/1S/0C/0R · fixed 3/3 prior · velocity ↓ (4→1, escalation
 Pass 2 [plan]: 2B/4S/0C/0R · fixed 8/8 prior · velocity ↓ (8→6, escalation no)
   heavy's one delta, 3bedca6→2de653b, run 20261016-065052-b29518. Fixed (no further pass, ruling jibot-code#41e2): the Opus default-reliant tests (same as the spec finding); rollback's bare `check`; the routing check now compares against $D/routing/routing.toml; `env -u ... bash "$t"` per file; `git fetch origin` before the rebase retry. Rebutted: "a behaviour-changing SUBSTANTIVE fix gets no independent review / falling-count rule" — ruling jibot-code#41e2 decision 4 gives a delta only to a behaviour-changing BLOCKER fix and retired the falling-count rule; the code pass and roborev's patrol are the later looks.
   plan: passes 2
+Pass 1 [code:branch]: 0B/4S/3C/0R · fixed -/- · velocity = (—→7, escalation no)
+  Stage 1 (general-purpose subagent, ran the tests) ∥ Stage 2 (fresheyes --gpt gpt-5.6-sol high, run 20261016-070345-1120d2), both over origin/feat/fleet-snapshot...9c5a8ae. Stage 2 verdict FAILED on two SUBSTANTIVE, no BLOCKER.
+  Fixed (Stage 1 S1): no test ran the Fable default against a too-old CLI; added test_fable_5_1_default_rejects_old_claude_code (2.1.256 refused by name), which fails with the default mutated to Opus (mutant rc=1).
+  Fixed (Stage 1 S2): the Fable line has no fix branch; FLEET.md names it the second rule-2 exception and says how the next upstream merge catches a miss.
+  Fixed (Stage 2 C): "GPT-6 review"/"GPT-6 default" wording in tests/fresheyes-gpt-provider-test.sh.
+  Rebutted (Stage 2 S): README states upstream's defaults. FLEET.md's standing policy since fleet-2026.09.22: the README describes upstream, so the fork's diff stays offerable upstream (rule 4), and "Where the fork differs from the README" is the fleet's statement.
+  Rebutted (Stage 2 S): "a behaviour-changing SUBSTANTIVE fix needs a delta, up to three falling-count passes". Ruling jibot-code#41e2 decision 4 (2026-10-13) gives a delta only to a behaviour-changing BLOCKER fix and retired the falling-count rule. The fixes here are test and doc only.
+  Not fixed, accepted (Stage 1 C): README lines 33/35 describe upstream (same as above); FLEET.md's Linux claim — confirmed by the Lima run at c1e04dd and re-run at the final head.
+  code: passes 1 · no delta owed (no BLOCKER)
 
 ## Chunks
 - [x] merge — ece38e8 upstream merge + c1e04dd fix-branch re-merge (no file changes); ancestry ok; routing-ok; macOS 8/8 rc=0

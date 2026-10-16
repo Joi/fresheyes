@@ -96,6 +96,15 @@ gate tests into explicit `FRESHEYES_CLAUDE_MODEL=claude-opus-5-5` cases.
 Upstream's Opus 5.5 gate arm (Claude Code 2.1.280) is kept for callers who name
 it. Moving the fleet to Opus 5.5 is a routing question (kata jibot-code#9nbr).
 
+The Fable line is fleet policy like the Sol line, but it has no branch of its
+own: it lives only on the integration branch, set in the merge ece38e8, and is
+the second exception to rule 2. The next merge of upstream must check both
+default lines against `routing.toml` and set either back by hand. The routing
+check catches a miss, and so does
+`test_fable_5_1_default_rejects_old_claude_code` in
+`tests/fresheyes-claude-provider-test.sh`. That test runs the default on Claude
+Code 2.1.256 and expects the Fable 5.1 gate's error.
+
 Since `fleet-2026.09.22` a review result is bound to the run that produced it
 (`fix/result-handle-binding`, upstream pull request 25, merged 2026-09-22, kata
 jibot-code#we92): the
