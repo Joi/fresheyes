@@ -194,8 +194,8 @@ if argv[:1] == ["--version"]:
     probe = os.environ.get("FRESHEYES_FAKE_CLAUDE_VERSION_PROBE")
     if probe:
         with open(probe, "w", encoding="utf-8") as handle:
-            handle.write("2.1.261")
-    print("2.1.261 (Claude Code)")
+            handle.write("2.1.283")
+    print("2.1.283 (Claude Code)")
     raise SystemExit(0)
 
 argv_file = os.environ.get("FRESHEYES_FAKE_ARGV")
