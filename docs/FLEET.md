@@ -24,7 +24,8 @@ lines; see the next section. `git diff upstream/main -- skills tests` at that
 tag is the two default lines, the GPT-6.1 arm, the fork's GPT paragraph in
 `SKILL.md`, and their tests.
 
-`fleet-2026.10.24` adds two fix branches (kata jibot-code#b7gw):
+`fleet-2026.10.24` adds two fix branches (kata jibot-code#b7gw), and
+`fleet-2026.10.24.2` adds that day's review fixes to the first:
 `fix/claude-reviewer-git-guard`, the Claude reviewer's `git` guard (see the next
 section), and `fix/branch-scope-origin-main`, which changes the
 branch-review scope example in `SKILL.md` from `main...HEAD` to
@@ -143,11 +144,13 @@ the comma-joined rule hid that only because Claude Code 2.1.310 never matched
 it, so the rules are now one per command. The guard refuses every subcommand
 but the four (and the read forms of the few that Claude Code runs itself),
 refuses `-c`, `--output`, `--ext-diff`, `--textconv`, `--remerge-diff`,
-`--submodule=diff` and their abbreviations in every argument, `--` or not (an option that takes a
+`--submodule=diff`, `--help` and their abbreviations in every argument, `--` or not (an option that takes a
 value can swallow the `--`), scrubs `GIT_EXTERNAL_DIFF`, `GIT_TRACE*` and
 `GIT_CONFIG_*`, passes `--no-ext-diff --no-textconv`, and sets every signature
 verifier to `/usr/bin/false`, so a configured external diff, textconv driver,
-merge driver or verifier no longer runs. Two limits remain: the managed policy file
+merge driver, verifier or man viewer no longer runs. It also exports
+`GIT_NO_LAZY_FETCH=1`, so a read in a partial clone fetches no missing object;
+git older than 2.44 ignores that variable. Two limits remain: the managed policy file
 above, and a filter driver (`filter.<name>.clean`, such as git-lfs) that the
 repository's attributes assign, which still runs when `git diff` reads the
 working tree. `/usr/bin/git ...` and `env git ...` do not reach the guard;
