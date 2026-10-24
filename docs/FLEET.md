@@ -142,10 +142,12 @@ argument list after `git diff`, and `git diff --output=<file>` writes a file;
 the comma-joined rule hid that only because Claude Code 2.1.310 never matched
 it, so the rules are now one per command. The guard refuses every subcommand
 but the four (and the read forms of the few that Claude Code runs itself),
-refuses `-c`, `--output`, `--ext-diff`, `--textconv` and their
-abbreviations, scrubs `GIT_EXTERNAL_DIFF`, `GIT_TRACE*` and `GIT_CONFIG_*`, and
-passes `--no-ext-diff --no-textconv`, so a configured external diff or
-textconv driver no longer runs. Two limits remain: the managed policy file
+refuses `-c`, `--output`, `--ext-diff`, `--textconv`, `--remerge-diff` and
+their abbreviations in every argument, `--` or not (an option that takes a
+value can swallow the `--`), scrubs `GIT_EXTERNAL_DIFF`, `GIT_TRACE*` and
+`GIT_CONFIG_*`, passes `--no-ext-diff --no-textconv`, and sets every signature
+verifier to `/usr/bin/false`, so a configured external diff, textconv driver,
+merge driver or verifier no longer runs. Two limits remain: the managed policy file
 above, and a filter driver (`filter.<name>.clean`, such as git-lfs) that the
 repository's attributes assign, which still runs when `git diff` reads the
 working tree. `/usr/bin/git ...` and `env git ...` do not reach the guard;
