@@ -25,7 +25,7 @@ tag is the two default lines, the GPT-6.1 arm, the fork's GPT paragraph in
 `SKILL.md`, and their tests.
 
 `fleet-2026.10.24` adds two fix branches (kata jibot-code#b7gw), and
-`fleet-2026.10.24.2` adds that day's review fixes to the first:
+`fleet-2026.10.24.2` and `.3` add that day's review fixes to the first:
 `fix/claude-reviewer-git-guard`, the Claude reviewer's `git` guard (see the next
 section), and `fix/branch-scope-origin-main`, which changes the
 branch-review scope example in `SKILL.md` from `main...HEAD` to
@@ -149,8 +149,9 @@ value can swallow the `--`), scrubs `GIT_EXTERNAL_DIFF`, `GIT_TRACE*` and
 `GIT_CONFIG_*`, passes `--no-ext-diff --no-textconv`, and sets every signature
 verifier to `/usr/bin/false`, so a configured external diff, textconv driver,
 merge driver, verifier or man viewer no longer runs. It also exports
-`GIT_NO_LAZY_FETCH=1`, so a read in a partial clone fetches no missing object;
-git older than 2.44 ignores that variable. Two limits remain: the managed policy file
+`GIT_NO_LAZY_FETCH=1`, so a read in a partial clone fetches no missing object.
+git honours that variable fully from 2.45.2 on, so with an older git the guard
+refuses to run in a partial clone (`fleet-2026.10.24.3`). Two limits remain: the managed policy file
 above, and a filter driver (`filter.<name>.clean`, such as git-lfs) that the
 repository's attributes assign, which still runs when `git diff` reads the
 working tree. `/usr/bin/git ...` and `env git ...` do not reach the guard;
