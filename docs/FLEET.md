@@ -24,6 +24,12 @@ lines; see the next section. `git diff upstream/main -- skills tests` at that
 tag is the two default lines, the GPT-6.1 arm, the fork's GPT paragraph in
 `SKILL.md`, and their tests.
 
+`fleet-2026.10.24` adds two fix branches (kata jibot-code#b7gw):
+`fix/claude-reviewer-git-guard`, the Claude reviewer's `git` guard (see the next
+section), and `fix/branch-scope-origin-main`, which changes the
+branch-review scope example in `SKILL.md` from `main...HEAD` to
+`origin/main...HEAD`.
+
 This file exists only on the integration branch. It is not offered upstream.
 
 ## Branches
@@ -125,9 +131,25 @@ Since `fleet-2026.09.21.3` the Claude reviewer runs read-only
 only Bash/Read/Glob/Grep, only the four git read commands pre-approved, and no
 user settings, hooks, plugins, MCP servers or repo `CLAUDE.md` loaded. It needs
 a logged-in CLI: `apiKeyHelper` or an `env` block in `settings.json` is ignored.
-Two limits remain, both in the spec under `docs/superpowers/specs/`: a managed
+Two limits remained, both in the spec under `docs/superpowers/specs/`: a managed
 policy file can grant Bash again, and a diff helper already defined in the
 machine's own git config still runs under a plain `git diff`.
+
+Since `fleet-2026.10.24` (`fix/claude-reviewer-git-guard`, kata
+jibot-code#b7gw) the reviewer's `git` is `skills/fresheyes/fresheyes-git-guard.sh`,
+through a per-launch shim first on its PATH. The pre-approval covered every
+argument list after `git diff`, and `git diff --output=<file>` writes a file;
+the comma-joined rule hid that only because Claude Code 2.1.310 never matched
+it, so the rules are now one per command. The guard refuses every subcommand
+but the four (and the read forms of the few that Claude Code runs itself),
+refuses `-c`, `--output`, `--ext-diff`, `--textconv` and their
+abbreviations, scrubs `GIT_EXTERNAL_DIFF`, `GIT_TRACE*` and `GIT_CONFIG_*`, and
+passes `--no-ext-diff --no-textconv`, so a configured external diff or
+textconv driver no longer runs. Two limits remain: the managed policy file
+above, and a filter driver (`filter.<name>.clean`, such as git-lfs) that the
+repository's attributes assign, which still runs when `git diff` reads the
+working tree. `/usr/bin/git ...` and `env git ...` do not reach the guard;
+Claude Code denies both (measured on 2.1.310).
 
 ## Making a fix
 
@@ -203,7 +225,11 @@ and start no real review.
 Never run `fresheyes.sh --help`, or any flag it does not know: it takes the
 flag as the review scope and launches a real review (upstream #6).
 
-All eight files pass on macOS as of 2026-10-16, on the merges that became
+All nine files pass on macOS as of 2026-10-24, on the merges that became
+`fleet-2026.10.24` (azbdmini, `/bin/bash` 3.2.57, Homebrew git 2.55.0), and
+on Linux (Lima on macct, Ubuntu 24.04, git 2.43.0) against the same commit;
+the ninth is `fresheyes-git-guard-test.sh`.
+All eight files passed on macOS as of 2026-10-16, on the merges that became
 `fleet-2026.10.16` (macct: macOS 26.6.2, `/bin/bash` 3.2.57, Homebrew
 `setsid`), and on Linux (Lima, Ubuntu 24.04) against the same commit.
 All eight files passed on macOS as of 2026-09-24, on the merge of upstream
