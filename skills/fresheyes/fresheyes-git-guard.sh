@@ -145,10 +145,29 @@ done < <(compgen -e)
 unset GIT_EXTERNAL_DIFF GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT GIT_DIFF_OPTS \
   GIT_EXEC_PATH GIT_PAGER PAGER GIT_ASKPASS SSH_ASKPASS GIT_SSH GIT_SSH_COMMAND \
   GIT_EDITOR GIT_SEQUENCE_EDITOR GIT_INDEX_FILE
-# GIT_NO_LAZY_FETCH (git 2.44 and later): in a partial clone a read of a
-# missing object would otherwise start a fetch, which writes to the object
-# store and can run transport and credential helpers. Older git ignores it.
+# GIT_NO_LAZY_FETCH: in a partial clone a read of a missing object would
+# otherwise start a fetch, which writes to the object store and can run
+# transport and credential helpers. git 2.45.0 introduced the variable, and
+# 2.45.2 added the check that also covers diff's prefetch, so with an older git
+# the guard refuses to run in a partial clone at all.
 export GIT_OPTIONAL_LOCKS=0 GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1
+version_at_least() { # version_at_least <major> <minor> <patch>
+  local v major minor patch
+  v="$("$real_git" --version 2>/dev/null)"
+  v="${v#git version }"
+  IFS=. read -r major minor patch <<<"${v%% *}"
+  major="${major//[!0-9]/}"; minor="${minor//[!0-9]/}"; patch="${patch//[!0-9]/}"
+  major="${major:-0}"; minor="${minor:-0}"; patch="${patch:-0}"
+  (( major != $1 )) && { (( major > $1 )); return; }
+  (( minor != $2 )) && { (( minor > $2 )); return; }
+  (( patch >= $3 ))
+}
+if ! version_at_least 2 45 2; then
+  if "$real_git" ${global[@]+"${global[@]}"} config --get-regexp \
+      '^(extensions\.partialclone|remote\..*\.promisor)$' >/dev/null 2>&1; then
+    refuse "a partial clone with git older than 2.45.2, which can fetch missing objects"
+  fi
+fi
 
 # A program that does nothing, for the signature verifiers below.
 no_op=/usr/bin/false

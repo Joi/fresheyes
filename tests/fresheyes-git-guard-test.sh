@@ -237,33 +237,40 @@ else
 fi
 
 # A partial clone: plain git fetches a missing blob on demand, the guard does
-# not. GIT_NO_LAZY_FETCH needs git 2.44 or later.
-git_minor="$("$REAL_GIT" --version | sed -E 's/^git version ([0-9]+)\.([0-9]+).*/\1 \2/')"
-if [[ "${git_minor% *}" -gt 2 || ( "${git_minor% *}" -eq 2 && "${git_minor#* }" -ge 44 ) ]]; then
-  PSRC="$TMP_DIR/psrc"
-  (
-    mkdir -p "$PSRC" && cd "$PSRC"
-    git init -q && git config user.email t@example.com && git config user.name t
-    git config uploadpack.allowFilter true
-    printf 'blob\n' > b.txt && git add b.txt && git commit -qm b
-  )
-  git clone -q --no-checkout --filter=blob:none "file://$PSRC" "$TMP_DIR/pclone" 2>/dev/null
-  git clone -q --no-checkout --filter=blob:none "file://$PSRC" "$TMP_DIR/pclone-plain" 2>/dev/null
-  (cd "$TMP_DIR/pclone-plain" && git show HEAD:b.txt >/dev/null 2>&1) \
-    && pass "fixture: plain git show in a partial clone fetches the missing blob" \
-    || fail "fixture: plain git show did not fetch the missing blob"
-  before="$(cd "$TMP_DIR/pclone" && find .git/objects -type f | sort)"
-  rc=0
-  (cd "$TMP_DIR/pclone" && bash "$GUARD" "$REAL_GIT" show HEAD:b.txt >/dev/null 2>&1) || rc=$?
-  after="$(cd "$TMP_DIR/pclone" && find .git/objects -type f | sort)"
-  if [[ "$rc" -ne 0 && "$before" == "$after" ]]; then
-    pass "a partial clone's missing blob is not fetched"
-  else
-    fail "partial clone (rc=$rc; objects changed: $([[ "$before" == "$after" ]] && echo no || echo yes))"
-  fi
+# not. With git 2.45.2 or later GIT_NO_LAZY_FETCH stops the fetch; with an
+# older git the guard refuses to run in a partial clone.
+PSRC="$TMP_DIR/psrc"
+(
+  mkdir -p "$PSRC" && cd "$PSRC"
+  git init -q && git config user.email t@example.com && git config user.name t
+  git config uploadpack.allowFilter true
+  printf 'blob\n' > b.txt && git add b.txt && git commit -qm b
+)
+git clone -q --no-checkout --filter=blob:none "file://$PSRC" "$TMP_DIR/pclone" 2>/dev/null
+git clone -q --no-checkout --filter=blob:none "file://$PSRC" "$TMP_DIR/pclone-plain" 2>/dev/null
+(cd "$TMP_DIR/pclone-plain" && git show HEAD:b.txt >/dev/null 2>&1) \
+  && pass "fixture: plain git show in a partial clone fetches the missing blob" \
+  || fail "fixture: plain git show did not fetch the missing blob"
+before="$(cd "$TMP_DIR/pclone" && find .git/objects -type f | sort)"
+rc=0
+(cd "$TMP_DIR/pclone" && bash "$GUARD" "$REAL_GIT" show HEAD:b.txt >/dev/null 2>"$TMP_DIR/stderr") || rc=$?
+after="$(cd "$TMP_DIR/pclone" && find .git/objects -type f | sort)"
+if [[ "$rc" -ne 0 && "$before" == "$after" ]]; then
+  pass "a partial clone's missing blob is not fetched ($(grep -q 'partial clone' "$TMP_DIR/stderr" && echo refused || echo GIT_NO_LAZY_FETCH))"
 else
-  echo "SKIP: partial clone (git older than 2.44 has no GIT_NO_LAZY_FETCH)"
+  fail "partial clone (rc=$rc; objects changed: $([[ "$before" == "$after" ]] && echo no || echo yes))"
 fi
+# An older git is refused in a partial clone: a fake git that reports 2.45.1
+# and passes everything else to the real one.
+printf '#!/bin/sh\n[ "$1" = --version ] && { echo "git version 2.45.1"; exit 0; }\nexec %q "$@"\n' "$REAL_GIT" > "$TMP_DIR/old-git"
+chmod +x "$TMP_DIR/old-git"
+rc=0
+(cd "$TMP_DIR/pclone" && bash "$GUARD" "$TMP_DIR/old-git" log --oneline -1 >/dev/null 2>"$TMP_DIR/stderr") || rc=$?
+[[ "$rc" -eq 128 ]] && grep -q 'partial clone' "$TMP_DIR/stderr" \
+  && pass "git older than 2.45.2: refused in a partial clone" || fail "old git in a partial clone: rc=$rc"
+rc=0
+(cd "$REPO" && bash "$GUARD" "$TMP_DIR/old-git" log --oneline -1 >/dev/null 2>&1) || rc=$?
+[[ "$rc" -eq 0 ]] && pass "git older than 2.45.2: runs in a full clone" || fail "old git in a full clone: rc=$rc"
 
 # A guard started without a real git refuses everything.
 rc=0
