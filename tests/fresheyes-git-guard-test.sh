@@ -196,6 +196,8 @@ expect_refused "log --diff-merges=remerge" log --diff-merges=remerge -1 "$MERGE"
 expect_refused "log --diff-merges r" log --diff-merges r -1 "$MERGE"
 expect_refused "log --diff-m=r (abbreviation)" log --diff-m=r -1 "$MERGE"
 expect_refused "diff --ext-diff" diff --ext-diff
+expect_refused "status --help (git help can run a man viewer)" status --help
+expect_refused "log --hel (abbreviation)" log --hel
 super_guard() { (cd "$SUPER" && bash "$GUARD" "$REAL_GIT" "$@" >/dev/null 2>"$TMP_DIR/stderr"); }
 rm -f "$MARK"/*; rc=0; super_guard diff --submodule=diff HEAD~1 HEAD || rc=$?
 [[ "$rc" -eq 128 ]] && no_marks && pass "diff --submodule=diff" || fail "diff --submodule=diff (rc=$rc)"
@@ -232,6 +234,35 @@ if [[ "$rc" -eq 0 ]] && no_marks && [[ ! -e "$TMP_DIR/pwned-trace" ]]; then
   pass "GIT_EXTERNAL_DIFF, GIT_TRACE and GIT_CONFIG_* are scrubbed"
 else
   fail "environment scrub (rc=$rc marks=$(ls "$MARK" | tr '\n' ' '))"
+fi
+
+# A partial clone: plain git fetches a missing blob on demand, the guard does
+# not. GIT_NO_LAZY_FETCH needs git 2.44 or later.
+git_minor="$("$REAL_GIT" --version | sed -E 's/^git version ([0-9]+)\.([0-9]+).*/\1 \2/')"
+if [[ "${git_minor% *}" -gt 2 || ( "${git_minor% *}" -eq 2 && "${git_minor#* }" -ge 44 ) ]]; then
+  PSRC="$TMP_DIR/psrc"
+  (
+    mkdir -p "$PSRC" && cd "$PSRC"
+    git init -q && git config user.email t@example.com && git config user.name t
+    git config uploadpack.allowFilter true
+    printf 'blob\n' > b.txt && git add b.txt && git commit -qm b
+  )
+  git clone -q --no-checkout --filter=blob:none "file://$PSRC" "$TMP_DIR/pclone" 2>/dev/null
+  git clone -q --no-checkout --filter=blob:none "file://$PSRC" "$TMP_DIR/pclone-plain" 2>/dev/null
+  (cd "$TMP_DIR/pclone-plain" && git show HEAD:b.txt >/dev/null 2>&1) \
+    && pass "fixture: plain git show in a partial clone fetches the missing blob" \
+    || fail "fixture: plain git show did not fetch the missing blob"
+  before="$(cd "$TMP_DIR/pclone" && find .git/objects -type f | sort)"
+  rc=0
+  (cd "$TMP_DIR/pclone" && bash "$GUARD" "$REAL_GIT" show HEAD:b.txt >/dev/null 2>&1) || rc=$?
+  after="$(cd "$TMP_DIR/pclone" && find .git/objects -type f | sort)"
+  if [[ "$rc" -ne 0 && "$before" == "$after" ]]; then
+    pass "a partial clone's missing blob is not fetched"
+  else
+    fail "partial clone (rc=$rc; objects changed: $([[ "$before" == "$after" ]] && echo no || echo yes))"
+  fi
+else
+  echo "SKIP: partial clone (git older than 2.44 has no GIT_NO_LAZY_FETCH)"
 fi
 
 # A guard started without a real git refuses everything.

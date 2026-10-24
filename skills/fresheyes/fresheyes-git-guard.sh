@@ -69,9 +69,10 @@ shift
 
 # Long options that write a file, run a program or read config from elsewhere.
 # --remerge-diff re-runs each merge, and a merge driver the attributes name
-# runs with it. git accepts any unambiguous abbreviation of a long option, so a
+# runs with it; --help becomes `git help <command>`, which can run a configured
+# man viewer (man.<tool>.cmd) through the shell. git accepts any unambiguous abbreviation of a long option, so a
 # prefix of three or more characters counts as the option itself.
-forbidden_long="output ext-diff textconv show-signature config-env exec-path open-files-in-pager remerge-diff"
+forbidden_long="output ext-diff textconv show-signature config-env exec-path open-files-in-pager remerge-diff help"
 
 # Every argument is checked, including those after `--`: an option that takes
 # a value can consume the `--` itself (`-S -- --output=<file>`), so the guard
@@ -144,7 +145,10 @@ done < <(compgen -e)
 unset GIT_EXTERNAL_DIFF GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT GIT_DIFF_OPTS \
   GIT_EXEC_PATH GIT_PAGER PAGER GIT_ASKPASS SSH_ASKPASS GIT_SSH GIT_SSH_COMMAND \
   GIT_EDITOR GIT_SEQUENCE_EDITOR GIT_INDEX_FILE
-export GIT_OPTIONAL_LOCKS=0 GIT_TERMINAL_PROMPT=0
+# GIT_NO_LAZY_FETCH (git 2.44 and later): in a partial clone a read of a
+# missing object would otherwise start a fetch, which writes to the object
+# store and can run transport and credential helpers. Older git ignores it.
+export GIT_OPTIONAL_LOCKS=0 GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1
 
 # A program that does nothing, for the signature verifiers below.
 no_op=/usr/bin/false
