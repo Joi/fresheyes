@@ -9,6 +9,9 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GUARD="$REPO_DIR/skills/fresheyes/fresheyes-git-guard.sh"
 REAL_GIT="$(command -v git)"
+# The caller's own git config (a signing format, a helper) must not decide
+# what the fixture does.
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/fresheyes-git-guard-test.XXXXXX")"
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -62,7 +65,7 @@ helper verifier
   printf 'one\n' > f.txt
   printf 'm.txt merge=marker\n*.txt diff=marker\n' > .gitattributes
   git add f.txt .gitattributes
-  git -c gpg.program="$TMP_DIR/signer" commit -qS -m init
+  git -c gpg.format=openpgp -c gpg.program="$TMP_DIR/signer" commit -qS -m init
   printf 'two\n' >> f.txt
   git config diff.external "$TMP_DIR/ext-diff"
   git config diff.marker.textconv "$TMP_DIR/textconv"
@@ -72,6 +75,24 @@ helper verifier
   git config log.diffMerges remerge
 )
 MERGE="$(cd "$REPO" && git rev-parse HEAD^)"
+
+# A second repository with a populated submodule whose gitlink changed, and an
+# external diff in the submodule's own config.
+SUPER="$TMP_DIR/super"
+helper sub-ext-diff
+(
+  mkdir -p "$TMP_DIR/subsrc" && cd "$TMP_DIR/subsrc"
+  git init -q && git config user.email t@example.com && git config user.name t
+  printf 'x\n' > s.txt && git add s.txt && git commit -qm s1
+  mkdir -p "$SUPER" && cd "$SUPER"
+  git init -q && git config user.email t@example.com && git config user.name t
+  git -c protocol.file.allow=always submodule -q add "$TMP_DIR/subsrc" sub
+  git commit -qm add-sub
+  cd sub && git config user.email t@example.com && git config user.name t
+  printf 'y\n' >> s.txt && git commit -qam s2
+  git config diff.external "$TMP_DIR/sub-ext-diff"
+  cd .. && git commit -qam bump-sub
+)
 
 guard() { # runs the guard in the repo; prints stdout, returns git's status
   (cd "$REPO" && bash "$GUARD" "$REAL_GIT" "$@" 2>"$TMP_DIR/stderr")
@@ -120,6 +141,10 @@ fixture_live() { # fixture_live <marker> <git args...>: plain git runs that help
 fixture_live verifier log -1 --format=%G?
 fixture_live merge-driver log --remerge-diff -1 "$(cd "$REPO" && git rev-parse HEAD^)"
 fixture_live merge-driver log -m -p -1 "$(cd "$REPO" && git rev-parse HEAD^)"
+rm -f "$MARK"/*
+(cd "$SUPER" && git diff --submodule=diff HEAD~1 HEAD >/dev/null 2>&1 || true)
+[[ -e "$MARK/sub-ext-diff" ]] && pass "fixture: plain git diff --submodule=diff runs the submodule's external diff" \
+  || fail "fixture: --submodule=diff did not run the submodule's external diff"
 printf 'keep\n' > "$TMP_DIR/victim"
 (cd "$REPO" && git diff --no-index -S -- --output="$TMP_DIR/victim" /dev/null /dev/null >/dev/null 2>&1 || true)
 [[ ! -s "$TMP_DIR/victim" ]] && pass "fixture: plain git lets -S consume -- and truncates the --output= file" \
@@ -171,6 +196,17 @@ expect_refused "log --diff-merges=remerge" log --diff-merges=remerge -1 "$MERGE"
 expect_refused "log --diff-merges r" log --diff-merges r -1 "$MERGE"
 expect_refused "log --diff-m=r (abbreviation)" log --diff-m=r -1 "$MERGE"
 expect_refused "diff --ext-diff" diff --ext-diff
+super_guard() { (cd "$SUPER" && bash "$GUARD" "$REAL_GIT" "$@" >/dev/null 2>"$TMP_DIR/stderr"); }
+rm -f "$MARK"/*; rc=0; super_guard diff --submodule=diff HEAD~1 HEAD || rc=$?
+[[ "$rc" -eq 128 ]] && no_marks && pass "diff --submodule=diff" || fail "diff --submodule=diff (rc=$rc)"
+rm -f "$MARK"/*; rc=0; super_guard diff --submod=diff HEAD~1 HEAD || rc=$?
+[[ "$rc" -eq 128 ]] && no_marks && pass "diff --submod=diff (abbreviation)" || fail "diff --submod=diff (rc=$rc)"
+(cd "$SUPER" && git config diff.submodule diff)
+rm -f "$MARK"/*; rc=0; super_guard diff HEAD~1 HEAD || rc=$?
+[[ "$rc" -eq 0 ]] && no_marks && pass "diff.submodule=diff in the config is overridden" \
+  || fail "diff under diff.submodule=diff (rc=$rc marks=$(ls "$MARK" | tr '\n' ' '))"
+rm -f "$MARK"/*; rc=0; super_guard diff --submodule=log HEAD~1 HEAD || rc=$?
+[[ "$rc" -eq 0 ]] && no_marks && pass "diff --submodule=log runs" || fail "diff --submodule=log (rc=$rc)"
 expect_refused "diff --ext (abbreviation)" diff --ext
 expect_refused "log -p --textconv" log -p --textconv
 expect_refused "log --show-signature" log --show-signature

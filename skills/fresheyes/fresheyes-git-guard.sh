@@ -93,6 +93,13 @@ check_options() {
     for word in $forbidden_long; do
       [[ "$word" == "$name"* ]] && refuse "$sub $arg"
     done
+    # --submodule=diff runs a child git diff for each submodule. Git puts its
+    # own exec directory first on that child's PATH, so the child skips this
+    # guard and its helpers are back on.
+    if [[ "submodule" == "$name"* && "$arg" == *=* ]]; then
+      value="${arg#*=}"
+      [[ "$value" == "diff" ]] && refuse "$sub $arg"
+    fi
     # --diff-merges=remerge (or r) is --remerge-diff by another name.
     if [[ ${#name} -ge 6 && "diff-merges" == "$name"* ]]; then
       if [[ "$arg" == *=* ]]; then
@@ -147,9 +154,11 @@ no_op=/usr/bin/false
 # --format (or a configured pretty format) verifies signatures whatever
 # log.showSignature says, so each verifier is replaced by a no-op and every
 # signature reads as unverified. log.diffMerges keeps -m from turning into a
-# remerge diff through the config.
+# remerge diff through the config, and diff.submodule keeps a configured
+# inline submodule diff (see check_options) from starting. Settings given with
+# -c also reach every child git through the environment.
 safety=(-c core.fsmonitor=false -c core.pager=cat -c core.hooksPath=/dev/null
-  -c log.showSignature=false -c log.diffMerges=separate
+  -c log.showSignature=false -c log.diffMerges=separate -c diff.submodule=short
   -c gpg.program="$no_op" -c gpg.openpgp.program="$no_op"
   -c gpg.x509.program="$no_op" -c gpg.ssh.program="$no_op" --no-pager)
 
