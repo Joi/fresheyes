@@ -68,15 +68,23 @@ sub="$1"
 shift
 
 # Long options that write a file, run a program or read config from elsewhere.
-# git accepts any unambiguous abbreviation of a long option, so a prefix of
-# three or more characters counts as the option itself.
-forbidden_long="output ext-diff textconv show-signature config-env exec-path open-files-in-pager"
+# --remerge-diff re-runs each merge, and a merge driver the attributes name
+# runs with it. git accepts any unambiguous abbreviation of a long option, so a
+# prefix of three or more characters counts as the option itself.
+forbidden_long="output ext-diff textconv show-signature config-env exec-path open-files-in-pager remerge-diff"
 
+# Every argument is checked, including those after `--`: an option that takes
+# a value can consume the `--` itself (`-S -- --output=<file>`), so the guard
+# cannot tell where git's options end. A pathspec that looks like a forbidden
+# option is refused too.
 check_options() {
-  local arg name word
+  local arg name word value next_is_merges=0
   for arg in "$@"; do
-    [[ "$arg" == "--" ]] && return 0
-    [[ "$arg" == --* ]] || continue
+    if [[ "$next_is_merges" == 1 ]]; then
+      next_is_merges=0
+      case "$arg" in r|remerge) refuse "$sub --diff-merges $arg" ;; esac
+    fi
+    [[ "$arg" == --?* ]] || continue
     name="${arg#--}"
     name="${name%%=*}"
     [[ ${#name} -ge 3 ]] || continue
@@ -85,6 +93,15 @@ check_options() {
     for word in $forbidden_long; do
       [[ "$word" == "$name"* ]] && refuse "$sub $arg"
     done
+    # --diff-merges=remerge (or r) is --remerge-diff by another name.
+    if [[ ${#name} -ge 6 && "diff-merges" == "$name"* ]]; then
+      if [[ "$arg" == *=* ]]; then
+        value="${arg#*=}"
+        case "$value" in r|remerge) refuse "$sub $arg" ;; esac
+      else
+        next_is_merges=1
+      fi
+    fi
   done
   return 0
 }
@@ -122,9 +139,19 @@ unset GIT_EXTERNAL_DIFF GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT GIT_DIFF_OPTS \
   GIT_EDITOR GIT_SEQUENCE_EDITOR GIT_INDEX_FILE
 export GIT_OPTIONAL_LOCKS=0 GIT_TERMINAL_PROMPT=0
 
-# Applied after the caller's -c settings, so these win.
+# A program that does nothing, for the signature verifiers below.
+no_op=/usr/bin/false
+[[ -x "$no_op" ]] || no_op=/bin/false
+
+# Applied after the caller's -c settings, so these win. A %G placeholder in a
+# --format (or a configured pretty format) verifies signatures whatever
+# log.showSignature says, so each verifier is replaced by a no-op and every
+# signature reads as unverified. log.diffMerges keeps -m from turning into a
+# remerge diff through the config.
 safety=(-c core.fsmonitor=false -c core.pager=cat -c core.hooksPath=/dev/null
-  -c log.showSignature=false --no-pager)
+  -c log.showSignature=false -c log.diffMerges=separate
+  -c gpg.program="$no_op" -c gpg.openpgp.program="$no_op"
+  -c gpg.x509.program="$no_op" -c gpg.ssh.program="$no_op" --no-pager)
 
 case "$sub" in
   diff|show|log)
