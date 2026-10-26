@@ -695,6 +695,15 @@ test_ambiguous_glob_is_refused() {
   assert_contains "$output" "INDEPENDENT CODE REVIEW PASSED" "single legacy glob base resolves"
 }
 
+test_ambiguous_glob_across_roots_is_refused() {
+  local pid
+  dead_pid pid
+  mkdir -p "$LOG_DIR" "$GLOBAL_LOG_DIR"
+  write_escape_target "$LOG_DIR/fresheyes-gpt-$pid.log"
+  write_escape_target "$GLOBAL_LOG_DIR/fresheyes-claude-$pid.log"
+  assert_handle_refused "$pid" "ambiguous legacy glob across log roots"
+}
+
 test_alive_claude_sidecars_missing_log
 test_alive_claude_sidecars_empty_log
 test_legacy_no_pid_preserves_numeric_progress
@@ -720,5 +729,6 @@ test_locator_symlink_escape_is_refused
 test_locator_sidecar_symlink_escape_is_refused
 test_glob_symlink_escape_is_refused
 test_ambiguous_glob_is_refused
+test_ambiguous_glob_across_roots_is_refused
 
 printf 'fresheyes-progress tests passed\n'
