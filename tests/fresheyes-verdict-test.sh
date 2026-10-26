@@ -78,6 +78,15 @@ check_none "an empty section" 0 "$TMP_DIR/none-empty.md"
 printf '### Files examined:\n- n/a\n---\n' > "$TMP_DIR/none-na.md"
 check_none "'n/a' under a level-3 heading with a colon" 0 "$TMP_DIR/none-na.md"
 
+printf '## Files Examined\nNone.\n- All read attempts failed with permission denied.\n- No repository command ran.\n\n## Issues Found\n' > "$TMP_DIR/none-then-reasons.md"
+check_none "'None.' followed by bullets that explain it" 0 "$TMP_DIR/none-then-reasons.md"
+
+printf '## Files Examined\n- `none.py`\n' > "$TMP_DIR/none-py.md"
+check_none "a file named none.py" 1 "$TMP_DIR/none-py.md"
+
+printf '## Files Examined\nNone of these were modified, only read:\n- src/a.py\n' > "$TMP_DIR/none-of.md"
+check_none "'None of ...' prose before a file list" 1 "$TMP_DIR/none-of.md"
+
 printf '## Files Examined   \n- README.md\n\n## Issues Found\n' > "$TMP_DIR/one-file.md"
 check_none "one file listed" 1 "$TMP_DIR/one-file.md"
 

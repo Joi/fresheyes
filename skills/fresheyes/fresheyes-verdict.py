@@ -12,9 +12,11 @@ Exits 1 when the file is missing/unreadable or contains no verdict marker.
 Usage: fresheyes-verdict.py --no-files-examined <review-file>
 Exits 0 when the review's "Files Examined" section is present and lists no
 file: the reviewer says it read nothing, so the text is not a review whatever
-its verdict says. Exits 1 otherwise, including when the file is unreadable or
-has no such section. The FIRST such heading is the review's own; the prompt
-puts it first, and a later one is a quotation.
+its verdict says. The section lists no file when its first line says so
+("None.", "- n/a", ...), whatever bullets explain it below, or when it has no
+list entry other than such a line. Exits 1 otherwise, including when the file
+is unreadable or has no such section. The FIRST such heading is the review's
+own; the prompt puts it first, and a later one is a quotation.
 """
 
 import re
@@ -24,7 +26,14 @@ from pathlib import Path
 FILES_HEADING = re.compile(r"^\s*#{1,6}\s*files\s+examined\s*:?\s*$", re.IGNORECASE)
 SECTION_END = re.compile(r"^\s*(#{1,6}\s|-{3,}\s*$|\*{3,}\s*$|_{3,}\s*$)")
 LIST_ENTRY = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+(.*\S)")
-NO_FILE = re.compile(r"^[\s*_`]*(none|n/?a|nothing|no\s+files?)\b", re.IGNORECASE)
+# The whole word, then punctuation and a space, the end of the line, or a
+# parenthesis or dash: "None.", "None", "None (reads failed)" and "None - ..."
+# match; a file named none.py and prose like "None of these ..." do not.
+NO_FILE = re.compile(
+    r"^[\s*_`]*(?:none|n/?a|nothing|no\s+files?(?:\s+(?:were\s+)?examined)?)[*_`]*"
+    r"(?:[.:;,!](?=\s|$)|\s*$|\s+[(\u2014\u2013-])",
+    re.IGNORECASE,
+)
 
 
 def read(path):
@@ -46,11 +55,18 @@ def examined_no_files(text: str) -> bool:
     start = next((i for i, line in enumerate(lines) if FILES_HEADING.match(line)), None)
     if start is None:
         return False
+    first = True
     for line in lines[start + 1:]:
         if SECTION_END.match(line):
             break
+        if not line.strip():
+            continue
         entry = LIST_ENTRY.match(line)
-        if entry and not NO_FILE.match(entry.group(1)):
+        content = entry.group(1) if entry else line
+        if first and NO_FILE.match(content):
+            return True
+        first = False
+        if entry and not NO_FILE.match(content):
             return False
     return True
 

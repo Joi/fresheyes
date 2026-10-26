@@ -526,6 +526,8 @@ fi
 # A review that examined no files is not a completed review: the runner exits 7
 # with state "unreviewed", still prints the reviewer's text (it says why), and
 # records no verdict. The detached poller reports the same state and exit code.
+# The detached run is pinned to setsid: a systemd-run launch forwards only a
+# fixed list of variables, and FRESHEYES_FAKE_EXAMINED_NONE is not on it.
 UNREVIEWED_LOG_DIR="$TEST_TMP/unreviewed-logs"
 UNREVIEWED_STDOUT="$TEST_TMP/unreviewed-stdout.txt"
 UNREVIEWED_STDERR="$TEST_TMP/unreviewed-stderr.txt"
@@ -581,6 +583,7 @@ unreviewed_launch=$(
     FRESHEYES_FAKE_ARGV="$TEST_TMP/codex-unreviewed-detached-argv.json" \
     FRESHEYES_FAKE_VERSION_PROBE="$VERSION_PROBE_FILE" \
     FRESHEYES_FAKE_EXAMINED_NONE=1 \
+    FRESHEYES_DETACH=setsid \
     FRESHEYES_LOG_DIR="$UNREVIEWED_DETACHED_LOG_DIR" \
     FRESHEYES_GLOBAL_LOG_DIR="$UNREVIEWED_DETACHED_GLOBAL_LOG_DIR" \
     FRESHEYES_GPT_MODEL= \
