@@ -37,7 +37,7 @@ if not sys.stdin.isatty():
     sys.stdin.read()
 
 prompt = sys.argv[-1]
-with open(os.environ["FRESHEYES_FAKE_PROMPT"], "w", encoding="utf-8") as handle:
+with open(os.environ["FRESHEYES_FAKE_ARGV"], "w", encoding="utf-8") as handle:
     handle.write(prompt)
 
 found = re.search(r"FRESHEYES-RUN:\s*([A-Za-z0-9][A-Za-z0-9._-]*)", prompt)
@@ -61,8 +61,8 @@ printf 'two\n' >> "$REPO/a.txt"
 git -C "$REPO" commit -qam second
 HEAD_SHA="$(git -C "$REPO" rev-parse HEAD)"
 
-# run_review <name> <args...>: runs the runner in the repo, in the foreground,
-# with the fake codex. Leaves the exit status in $status and the files named
+# run_review <name> <args...>: runs the runner in the repo with the fake codex,
+# detaching (when the args do) through $RUN_DETACH, setsid by default. Leaves the exit status in $status and the files named
 # for <name> under $TEST_TMP.
 run_review() {
   local name="$1"
@@ -72,7 +72,7 @@ run_review() {
   (
     cd "$REPO" &&
       PATH="$FAKE_BIN:$PATH" \
-      FRESHEYES_FAKE_PROMPT="$TEST_TMP/$name.prompt" \
+      FRESHEYES_FAKE_ARGV="$TEST_TMP/$name.prompt" \
       FRESHEYES_LOG_DIR="$TEST_TMP/$name-logs" \
       FRESHEYES_GLOBAL_LOG_DIR="$TEST_TMP/$name-global-logs" \
       FRESHEYES_GPT_MODEL= \
@@ -80,6 +80,7 @@ run_review() {
       FRESHEYES_REASONING= \
       FRESHEYES_PROVIDER= \
       FRESHEYES_MODE= \
+      FRESHEYES_DETACH="${RUN_DETACH:-setsid}" \
       timeout 30s bash "$RUNNER" "$@" </dev/null
   ) >"$TEST_TMP/$name.stdout" 2>"$TEST_TMP/$name.stderr"
   status=$?
@@ -156,6 +157,9 @@ expect_refusal() {
 }
 
 expect_refusal since-no-value "--since requires a commit" --foreground --gpt --since
+# An empty value is a caller whose variable was unset, not a request for the
+# default scope.
+expect_refusal since-empty-value "--since requires a commit" --foreground --gpt --since "" "Review a.txt."
 expect_refusal since-bad-ref "is not a commit" --foreground --gpt --since no-such-ref
 expect_refusal since-empty "nothing to review" --foreground --gpt --since HEAD
 expect_refusal since-with-scope "builds the scope itself" --foreground --gpt --since HEAD~1 "Review a.txt."
@@ -186,30 +190,79 @@ grep -Fq "Rebuttal: it is meant to" "$TEST_TMP/rebut-scope.prompt" || fail "--re
 
 : > "$TEST_TMP/empty.md"
 expect_refusal rebut-no-value "--rebuttals requires a file" --foreground --gpt --rebuttals
+expect_refusal rebut-empty-value "--rebuttals requires a file" --foreground --gpt --rebuttals "" "Review a.txt."
 expect_refusal rebut-missing "cannot read the rebuttals file" --foreground --gpt --rebuttals "$TEST_TMP/missing.md" "Review a.txt."
 expect_refusal rebut-empty "is empty" --foreground --gpt --rebuttals "$TEST_TMP/empty.md" "Review a.txt."
 expect_refusal rebut-automatic "manual reviews only" --gpt --automatic --rebuttals "$REBUTTALS"
 
-# --- 5. a detached review keeps the head the parent resolved ---
-if command -v setsid >/dev/null 2>&1; then
-  run_review detached --gpt --since HEAD~1 --rebuttals "$REBUTTALS"
-  [[ "$status" -eq 0 ]] || { cat "$TEST_TMP/detached.stderr" >&2; fail "detached launch exited $status"; }
-  detached_handle="$(sed -n 's/^FRESHPID=//p' "$TEST_TMP/detached.stdout")"
-  [[ -n "$detached_handle" ]] || fail "detached launch printed no FRESHPID"
-  # Move HEAD at once: the child must review the head the parent resolved.
-  printf 'three\n' >> "$REPO/a.txt"
-  git -C "$REPO" commit -qam third
-  for _ in $(seq 1 100); do
-    [[ -s "$TEST_TMP/detached.prompt" ]] && grep -q '"state":"complete"' \
-      "$TEST_TMP/detached-logs/fresheyes-$detached_handle.log.status.json" 2>/dev/null && break
+# --- 5. a detached review keeps the commits the parent resolved ---
+# A fake git holds a detached child at its first git call until the test has
+# moved HEAD. A child that re-resolves --since therefore sees the new HEAD,
+# every time; a child that takes the parent's commits never calls git.
+REAL_GIT="$(command -v git)"
+RELEASE="$TEST_TMP/release-child-git"
+cat > "$FAKE_BIN/git" <<EOF
+#!/usr/bin/env bash
+if [[ "\${FRESHEYES_DAEMONIZED:-0}" == "1" ]]; then
+  for _ in \$(seq 1 100); do
+    [[ -e "$RELEASE" ]] && break
     sleep 0.1
   done
-  [[ -s "$TEST_TMP/detached.prompt" ]] || fail "the detached review never launched the reviewer"
-  grep -Fq "git diff $BASE..$HEAD_SHA" "$TEST_TMP/detached.prompt" \
-    || fail "the detached child re-resolved --since instead of using the parent's commits"
-  grep -Fq "Rebuttal: it is meant to" "$TEST_TMP/detached.prompt" || fail "the detached child lost the rebuttals"
-else
-  printf 'skip: detached --since check (no setsid)\n'
 fi
+exec "$REAL_GIT" "\$@"
+EOF
+chmod +x "$FAKE_BIN/git"
+
+# A fake systemd-run: runs the unit's command in the background with only the
+# --setenv environment, as a transient unit would.
+cat > "$FAKE_BIN/systemd-run" <<'EOF'
+#!/usr/bin/env bash
+child_env=()
+cmd=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --setenv) child_env+=("$2"); shift 2 ;;
+    --user|--collect|--quiet|--wait|--property=*) shift ;;
+    *) cmd+=("$1"); shift ;;
+  esac
+done
+[[ ${#cmd[@]} -gt 0 ]] || exit 1
+env -i "${child_env[@]}" "${cmd[@]}" </dev/null >/dev/null 2>&1 &
+exit 0
+EOF
+chmod +x "$FAKE_BIN/systemd-run"
+
+check_detached_pin() {
+  local method="$1"
+  local name="detached-$method"
+  local base head handle
+  base="$(git -C "$REPO" rev-parse HEAD~1)"
+  head="$(git -C "$REPO" rev-parse HEAD)"
+  rm -f "$RELEASE"
+  RUN_DETACH="$method" run_review "$name" --gpt --since HEAD~1 --rebuttals "$REBUTTALS"
+  [[ "$status" -eq 0 ]] || { cat "$TEST_TMP/$name.stderr" >&2; fail "$name: launch exited $status"; }
+  handle="$(sed -n 's/^FRESHPID=//p' "$TEST_TMP/$name.stdout")"
+  [[ -n "$handle" ]] || fail "$name: no FRESHPID"
+  printf '%s\n' "$method" >> "$REPO/a.txt"
+  git -C "$REPO" commit -qam "moved during $method"
+  : > "$RELEASE"
+  for _ in $(seq 1 150); do
+    grep -q '"state":"complete"' "$TEST_TMP/$name-logs/fresheyes-$handle.log.status.json" 2>/dev/null && break
+    sleep 0.1
+  done
+  [[ -s "$TEST_TMP/$name.prompt" ]] || fail "$name: the detached review never launched the reviewer"
+  grep -Fq "git diff $base..$head" "$TEST_TMP/$name.prompt" \
+    || fail "$name: the detached child did not review the commits the parent resolved ($base..$head)"
+  grep -Fq "Rebuttal: it is meant to" "$TEST_TMP/$name.prompt" || fail "$name: the detached child lost the rebuttals"
+  grep -q "\"reviewed_head\":\"$head\"" "$TEST_TMP/$name-logs/fresheyes-$handle.log.status.json" \
+    || fail "$name: status.json does not record the parent's reviewed_head"
+}
+
+if command -v setsid >/dev/null 2>&1; then
+  check_detached_pin setsid
+else
+  printf 'skip: detached --since check through setsid (no setsid)\n'
+fi
+check_detached_pin systemd-run
 
 printf 'fresheyes delta scope tests passed\n'

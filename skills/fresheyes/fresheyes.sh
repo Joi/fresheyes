@@ -70,7 +70,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --since)
-      if [[ $# -lt 2 ]]; then
+      if [[ $# -lt 2 || -z "$2" ]]; then
         echo "Error: --since requires a commit (the head of the last reviewed state)." >&2
         exit 1
       fi
@@ -78,7 +78,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --rebuttals)
-      if [[ $# -lt 2 ]]; then
+      if [[ $# -lt 2 || -z "$2" ]]; then
         echo "Error: --rebuttals requires a file of declined findings and their rebuttals." >&2
         exit 1
       fi
