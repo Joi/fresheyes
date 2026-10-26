@@ -308,12 +308,16 @@ line_count_or_zero() {
 # and symlinks walked out of, a fallback to the provider transcript, and an
 # identity a repointed locator could choose), so it is gone. Verification and
 # delivery still read ONE file — this one.
+#
+# With no readable provider in status.json, the sidecar still wins when it
+# exists: only a GPT manual run writes one, and its transcript quotes whatever
+# the reviewer read, verdict lines included (upstream #13).
 resolve_result_file() {
   local base="$1"
   local provider mode
   provider=$(status_file_field "$base" "provider" 2>/dev/null || true)
   mode=$(status_file_field "$base" "mode" 2>/dev/null || true)
-  if [[ "$provider" == "gpt" && "$mode" == "manual" && -s "$base.result.md" ]]; then
+  if [[ -s "$base.result.md" ]] && [[ -z "$provider" || ( "$provider" == "gpt" && "$mode" == "manual" ) ]]; then
     printf '%s\n' "$base.result.md"
     return 0
   fi

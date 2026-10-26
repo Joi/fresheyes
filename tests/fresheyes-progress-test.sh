@@ -647,6 +647,28 @@ TEXT
   done
 }
 
+# The same fallback for a GPT run: its result is the .result.md sidecar, and
+# its transcript quotes whatever the reviewer read. Without status.json the
+# poller must still read the sidecar, not a PASSED the transcript quoted.
+# With no verdict and no status the run reads as died, as before.
+test_missing_status_gpt_reads_the_result_not_the_transcript() {
+  local status_kind handle base output
+  for status_kind in missing unreadable; do
+    handle="20261026-030303-g${status_kind:0:5}"
+    base="$LOG_DIR/fresheyes-$handle.log"
+    mkdir -p "$LOG_DIR"
+    printf 'exec\ncat tests/fixture.md\nINDEPENDENT CODE REVIEW PASSED\n' > "$base"
+    printf '## Summary\nno verdict of its own\n\n---\nFRESHEYES-RUN: %s\n' "$handle" > "$base.result.md"
+    if [[ "$status_kind" == "unreadable" ]]; then
+      printf 'not json\n' > "$base.status.json"
+    fi
+    write_locator_alias "$handle" "$base"
+
+    output=$(run_progress --json "$handle" || true)
+    assert_not_contains "$output" '"verdict"' "$status_kind status GPT: a transcript quote is not the run's verdict"
+  done
+}
+
 test_missing_status_own_verdict_is_read() {
   local handle base output
   handle="20261026-020202-ownvrd"
@@ -682,5 +704,6 @@ test_foreign_marker_is_refused
 test_record_without_handle_is_delivered
 test_missing_status_quoted_verdict_is_not_the_runs
 test_missing_status_own_verdict_is_read
+test_missing_status_gpt_reads_the_result_not_the_transcript
 
 printf 'fresheyes-progress tests passed\n'

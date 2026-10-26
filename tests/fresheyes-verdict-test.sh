@@ -108,6 +108,20 @@ check "a foreign pair after the run's own is not read as its verdict" 1 "" "$TMP
 printf '**INDEPENDENT CODE REVIEW PASSED**\nThe reviewer kept writing.\nFRESHEYES-RUN: %s\n' "$RUN" > "$TMP_DIR/separated.md"
 check "a verdict separated from the run marker is not bound" 1 "" "$TMP_DIR/separated.md" "$RUN"
 
+# --- Read-only ---
+# The poller promises to change nothing on disk; the parser runs under it.
+COPY_DIR="$TMP_DIR/skill-copy"
+mkdir -p "$COPY_DIR"
+cp "$SKILL_DIR/fresheyes-verdict.py" "$SKILL_DIR/fresheyes-handle.py" "$COPY_DIR/"
+python3 "$COPY_DIR/fresheyes-verdict.py" "$TMP_DIR/bound.md" "$RUN" >/dev/null 2>&1 || true
+if [[ -e "$COPY_DIR/__pycache__" ]]; then
+  echo "FAIL: the parser wrote __pycache__ into the skill directory"
+  FAIL_COUNT=$((FAIL_COUNT + 1))
+else
+  echo "PASS: the parser writes nothing into the skill directory"
+  PASS_COUNT=$((PASS_COUNT + 1))
+fi
+
 # --- Single source of truth ---
 
 marker_files="$(grep -rlF 'INDEPENDENT CODE REVIEW[ \t]+(PASSED|FAILED)' "$SKILL_DIR" || true)"

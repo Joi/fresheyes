@@ -40,6 +40,8 @@ def load_marker_re():
     path = Path(__file__).resolve().with_name("fresheyes-handle.py")
     spec = importlib.util.spec_from_file_location("fresheyes_handle", path)
     module = importlib.util.module_from_spec(spec)
+    # The poller promises to write nothing; no __pycache__ beside the skill.
+    sys.dont_write_bytecode = True
     spec.loader.exec_module(module)
     return module.MARKER_RE
 
