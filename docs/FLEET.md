@@ -157,6 +157,17 @@ repository's attributes assign, which still runs when `git diff` reads the
 working tree. `/usr/bin/git ...` and `env git ...` do not reach the guard;
 Claude Code denies both (measured on 2.1.310).
 
+Since `fleet-2026.10.26` a manual review that examined no files is not a
+completed review (`fix/unreviewed-exit-code`, upstream pull request 34, kata
+jibot-code#9w74, upstream issue 18). When the review's own Files Examined list
+names no file ("None.", "No files were examined because ..."), the runner
+prints the reviewer's text, records state `unreviewed` with no verdict and
+exits 7, and `fresheyes-progress.sh` reports the same state with exit 7 from
+`--json` and `--result`. A caller that reads only the exit status, or only
+`state` and `verdict`, no longer records such a run as a review. Automatic
+mode is unchanged: its JSON has no files list, and it blocks the commit
+unless the review approves.
+
 ## Making a fix
 
 ```bash
