@@ -179,6 +179,21 @@ raised again only on new evidence. Together they are the delta pass of the
 fleet's review cycle (ruling jibot-code#41e2, after jibot-code#yqcv). Both are
 manual-mode only; `SKILL.md` describes them.
 
+Since `fleet-2026.10.26.3` the verdict is bound to the run as the result is
+(`fix/verdict-bound-to-run`, upstream pull request 32, kata jibot-code#f1vd,
+upstream issues 13 and 5). `fresheyes-verdict.py` reads `INDEPENDENT CODE
+REVIEW PASSED` or `FAILED` only as a flush-left line of its own, and, given the
+run's handle, only from the line just above the last `FRESHEYES-RUN:` line,
+which must carry that handle. The runner passes its handle and reads the
+verdict and the Files Examined list from the result file alone, never the GPT
+transcript. The poller, when it has no readable `status.json`, reads a GPT
+run's `.result.md` sidecar rather than its transcript and asks for the bound
+verdict when the result carries the run's marker. A review that quotes a
+verdict and gives none of its own now reports `complete` with no `verdict`.
+One limit is deliberate: a result with no run marker at all, read by the poller
+without a `status.json`, is a pre-binding result and still takes its last
+flush-left marker.
+
 ## Making a fix
 
 ```bash
@@ -253,7 +268,11 @@ and start no real review.
 Never run `fresheyes.sh --help`, or any flag it does not know: it takes the
 flag as the review scope and launches a real review (upstream #6).
 
-All ten files pass on macOS as of 2026-10-26, on the merge that became
+All ten files pass on macOS as of 2026-10-26 on the merge that became
+`fleet-2026.10.26.3` (macct: `/bin/bash` 3.2.57, Homebrew git 2.55.0), and on
+Linux (Lima on macct, Ubuntu 24.04, bash 5.2.21, git 2.43.0) against the same
+commit.
+All ten files passed on macOS as of 2026-10-26, on the merge that became
 `fleet-2026.10.26.2` (macct: `/bin/bash` 3.2.57, Homebrew `setsid`), and on
 Linux (Lima on macct, Ubuntu 24.04, git 2.43.0) against the same commit; the
 tenth is `fresheyes-delta-scope-test.sh`.
