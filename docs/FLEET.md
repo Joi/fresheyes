@@ -168,6 +168,17 @@ exits 7, and `fresheyes-progress.sh` reports the same state with exit 7 from
 mode is unchanged: its JSON has no files list, and it blocks the commit
 unless the review approves.
 
+Since `fleet-2026.10.26.2` a later review round can review only what changed
+and carry the caller's rebuttals (`fix/delta-review-since-rebuttals`, upstream
+pull request 33, kata jibot-code#aew7, upstream issue 19). `--since <commit>`
+reviews `git diff <commit>..HEAD`, two dots, and records `reviewed_base` and
+`reviewed_head`, which `fresheyes-progress.sh --json` reports; the next
+round's `--since` is the previous run's `reviewed_head`. `--rebuttals <file>`
+gives the reviewer the findings the caller declined, with its reasons, to be
+raised again only on new evidence. Together they are the delta pass of the
+fleet's review cycle (ruling jibot-code#41e2, after jibot-code#yqcv). Both are
+manual-mode only; `SKILL.md` describes them.
+
 ## Making a fix
 
 ```bash
@@ -242,6 +253,10 @@ and start no real review.
 Never run `fresheyes.sh --help`, or any flag it does not know: it takes the
 flag as the review scope and launches a real review (upstream #6).
 
+All ten files pass on macOS as of 2026-10-26, on the merge that became
+`fleet-2026.10.26.2` (macct: `/bin/bash` 3.2.57, Homebrew `setsid`), and on
+Linux (Lima on macct, Ubuntu 24.04, git 2.43.0) against the same commit; the
+tenth is `fresheyes-delta-scope-test.sh`.
 All nine files pass on macOS as of 2026-10-24, on the merges that became
 `fleet-2026.10.24` (azbdmini, `/bin/bash` 3.2.57, Homebrew git 2.55.0), and
 on Linux (Lima on macct, Ubuntu 24.04, git 2.43.0) against the same commit;
