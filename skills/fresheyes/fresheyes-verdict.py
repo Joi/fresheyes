@@ -26,12 +26,19 @@ from pathlib import Path
 FILES_HEADING = re.compile(r"^\s*#{1,6}\s*files\s+examined\s*:?\s*$", re.IGNORECASE)
 SECTION_END = re.compile(r"^\s*(#{1,6}\s|-{3,}\s*$|\*{3,}\s*$|_{3,}\s*$)")
 LIST_ENTRY = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+(.*\S)")
-# The whole word, then punctuation and a space, the end of the line, or a
-# parenthesis or dash: "None.", "None", "None (reads failed)" and "None - ..."
-# match; a file named none.py and prose like "None of these ..." do not.
+# A sentence that says no file was read may go on to say why. A short word
+# ("None", "n/a", "nothing", "no files") must stand alone: then punctuation
+# and a space or the end of the line, the end of the line, or a parenthesis or
+# dash, with emphasis markup allowed around it. "None.", "**None.**",
+# "None (reads failed)" and "No files were examined because ..." match; a file
+# named none.py and prose like "None of these were modified" do not.
 NO_FILE = re.compile(
-    r"^[\s*_`]*(?:none|n/?a|nothing|no\s+files?(?:\s+(?:were\s+)?examined)?)[*_`]*"
-    r"(?:[.:;,!](?=\s|$)|\s*$|\s+[(\u2014\u2013-])",
+    r"^[\s*_`]*(?:"
+    r"(?:no\s+files?|nothing)\s+(?:(?:was|were)\s+)?(?:examined|read)\b"
+    r"|"
+    r"(?:none|n/?a|nothing|no\s+files?)[*_`]*"
+    r"(?:[.:;,!][*_`]*(?=\s|$)|\s*$|\s+[(\u2014\u2013-])"
+    r")",
     re.IGNORECASE,
 )
 

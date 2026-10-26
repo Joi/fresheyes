@@ -81,6 +81,15 @@ check_none "'n/a' under a level-3 heading with a colon" 0 "$TMP_DIR/none-na.md"
 printf '## Files Examined\nNone.\n- All read attempts failed with permission denied.\n- No repository command ran.\n\n## Issues Found\n' > "$TMP_DIR/none-then-reasons.md"
 check_none "'None.' followed by bullets that explain it" 0 "$TMP_DIR/none-then-reasons.md"
 
+printf '## Files Examined\n- **None.**\n' > "$TMP_DIR/none-bold.md"
+check_none "a bold '**None.**' bullet" 0 "$TMP_DIR/none-bold.md"
+
+printf '## Files Examined\n- No files were examined because access was denied.\n' > "$TMP_DIR/no-files-because.md"
+check_none "'No files were examined because ...'" 0 "$TMP_DIR/no-files-because.md"
+
+printf '## Files Examined\nNothing was read: every command timed out.\n' > "$TMP_DIR/nothing-read.md"
+check_none "'Nothing was read: ...'" 0 "$TMP_DIR/nothing-read.md"
+
 printf '## Files Examined\n- `none.py`\n' > "$TMP_DIR/none-py.md"
 check_none "a file named none.py" 1 "$TMP_DIR/none-py.md"
 
