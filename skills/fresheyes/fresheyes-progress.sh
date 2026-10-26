@@ -875,6 +875,16 @@ if [[ "$STATUS_STATE" == "handle_mismatch" ]]; then
   RESULT_HANDLE="$STATUS_RESULT_HANDLE"
   WITHHOLD_STDERR=1
   MESSAGE=$(_mismatch_message "$STATUS_RESULT_HANDLE")
+elif [[ "$STATUS_STATE" == "unreviewed" && "$_HANDLE_STATUS" != "6" ]]; then
+  # Recorded by the runner: the review says it examined no files. The text is
+  # this run's and is returned by --result, but it is not a completed review.
+  REVIEW_STATE="unreviewed"
+  STATE_EXIT_CODE=7
+  MESSAGE="unreviewed — the reviewer examined no files, so this is not a completed review. --result prints what the reviewer said; re-run the review, and if it repeats, the reviewer cannot read the repository."
+elif [[ "$STATUS_STATE" == "unreviewed" ]]; then
+  REVIEW_STATE="handle_mismatch"
+  STATE_EXIT_CODE=6
+  MESSAGE=$(_mismatch_message "$RESULT_HANDLE")
 elif [[ "$STATUS_STATE" == "complete" || -n "$VERDICT" ]]; then
   REVIEW_STATE="complete"
   # The verification above is this script's own, whatever status.json claims:
@@ -939,12 +949,23 @@ if [[ "$OUTPUT_MODE" == "result" ]]; then
     print_failure_diagnostic "$LOG_FILE" "$WITHHOLD_STDERR"
     exit "$STATE_EXIT_CODE"
   fi
+  if [[ "$REVIEW_STATE" == "unreviewed" ]]; then
+    print_final_review_if_nonempty "$LOG_FILE" || true
+    printf 'Fresh Eyes: %s\n' "$MESSAGE" >&2
+    exit "$STATE_EXIT_CODE"
+  fi
   print_result_or_pending "$REVIEW_STATE" "$LOG_FILE"
   exit $?
 fi
 
 if [[ "$REVIEW_STATE" == "handle_mismatch" ]]; then
   print_mismatch_diagnostic "$LOG_FILE"
+  exit "$STATE_EXIT_CODE"
+fi
+
+if [[ "$REVIEW_STATE" == "unreviewed" ]]; then
+  print_final_review_if_nonempty "$LOG_FILE" || true
+  printf 'Fresh Eyes: %s\n' "$MESSAGE" >&2
   exit "$STATE_EXIT_CODE"
 fi
 
