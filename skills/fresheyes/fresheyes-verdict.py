@@ -5,9 +5,23 @@ The ONE home for the verdict marker. Both fresheyes.sh (the launcher) and
 fresheyes-progress.sh (the poller) call this file, so they can never disagree
 about what a completed review looks like. Do not copy this regex elsewhere.
 
-Usage: fresheyes-verdict.py <review-file>
-Prints "passed" or "failed" (the LAST marker wins) and exits 0.
-Exits 1 when the file is missing/unreadable or contains no verdict marker.
+Usage: fresheyes-verdict.py <review-file> [<run-handle>]
+Prints "passed" or "failed" and exits 0.
+Exits 1 when the file is missing/unreadable or carries no verdict of its own.
+
+A review quotes what it reads, so the marker phrase anywhere in the file is not
+a verdict (upstream #5, #13). Two rules decide which line is:
+
+- The marker is a whole line of its own, flush left, plain, in bold or as a
+  heading. An indented, line-numbered, blockquoted or inline copy is a quote.
+- With a run handle, the verdict is bound to the run: the last FRESHEYES-RUN
+  line in the file must carry this handle, and the line just above it (blank
+  lines aside) must be the marker. A quoted pair carries another run's handle,
+  and a run's handle is unknown before the run starts, so no file can carry it.
+  Without a handle (a record from before the run marker existed) the last
+  flush-left marker wins.
+
+The run marker itself is read by fresheyes-handle.py, its one home.
 
 Usage: fresheyes-verdict.py --no-files-examined <review-file>
 Exits 0 when the review's "Files Examined" section is present and lists no
@@ -19,9 +33,16 @@ is unreadable or has no such section. The FIRST such heading is the review's
 own; the prompt puts it first, and a later one is a quotation.
 """
 
+import importlib.util
 import re
 import sys
 from pathlib import Path
+
+VERDICT_RE = re.compile(
+    r"^(?:#{1,6}[ \t]+)?(?:\*\*|__)?INDEPENDENT CODE REVIEW[ \t]+(PASSED|FAILED)\b"
+    r"[ \t]*(?:\*\*|__)?[ \t]*$",
+    re.IGNORECASE,
+)
 
 FILES_HEADING = re.compile(r"^\s*#{1,6}\s*files\s+examined\s*:?\s*$", re.IGNORECASE)
 SECTION_END = re.compile(r"^\s*(#{1,6}\s|-{3,}\s*$|\*{3,}\s*$|_{3,}\s*$)")
@@ -50,10 +71,43 @@ def read(path):
         return None
 
 
-def verdict(text: str) -> str:
+def load_marker_re():
+    path = Path(__file__).resolve().with_name("fresheyes-handle.py")
+    spec = importlib.util.spec_from_file_location("fresheyes_handle", path)
+    module = importlib.util.module_from_spec(spec)
+    # The poller promises to write nothing; no __pycache__ beside the skill.
+    sys.dont_write_bytecode = True
+    spec.loader.exec_module(module)
+    return module.MARKER_RE
+
+
+def verdict_of(line):
+    match = VERDICT_RE.match(line)
+    return match.group(1).lower() if match else ""
+
+
+def bound_verdict(lines, handle):
+    marker_re = load_marker_re()
+    for index in range(len(lines) - 1, -1, -1):
+        found = marker_re.match(lines[index])
+        if not found:
+            continue
+        if found.group(1) != handle:
+            return ""
+        for above in range(index - 1, -1, -1):
+            if lines[above].strip():
+                return verdict_of(lines[above])
+        return ""
+    return ""
+
+
+def verdict(text: str, handle: str = "") -> str:
+    lines = text.splitlines()
+    if handle:
+        return bound_verdict(lines, handle)
     found = ""
-    for match in re.finditer(r"INDEPENDENT CODE REVIEW\s+(PASSED|FAILED)\b", text, re.IGNORECASE):
-        found = match.group(1).lower()
+    for line in lines:
+        found = verdict_of(line) or found
     return found
 
 
@@ -83,12 +137,12 @@ def main() -> int:
     if len(args) == 2 and args[0] == "--no-files-examined":
         text = read(args[1])
         return 0 if text is not None and examined_no_files(text) else 1
-    if len(args) != 1:
+    if len(args) not in (1, 2):
         return 1
     text = read(args[0])
     if text is None:
         return 1
-    found = verdict(text)
+    found = verdict(text, args[1] if len(args) == 2 else "")
     if not found:
         return 1
     print(found)
