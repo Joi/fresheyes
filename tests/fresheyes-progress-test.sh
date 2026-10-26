@@ -704,6 +704,31 @@ test_ambiguous_glob_across_roots_is_refused() {
   assert_handle_refused "$pid" "ambiguous legacy glob across log roots"
 }
 
+# A root whose name contains another root's name plus a space is still a
+# distinct root: deduplication compares whole paths.
+test_ambiguous_glob_across_roots_with_spaces_is_refused() {
+  local pid output status
+  # Built from the resolved temp dir (macOS: /var -> /private/var), since that
+  # is the spelling the resolver compares.
+  local real_tmp
+  real_tmp=$(cd "$TEST_TMP" && pwd -P)
+  local spaced_global="$real_tmp/g"
+  local spaced_local="$real_tmp/l $spaced_global"
+  dead_pid pid
+  mkdir -p "$spaced_local" "$spaced_global"
+  write_escape_target "$spaced_local/fresheyes-gpt-$pid.log"
+  write_escape_target "$spaced_global/fresheyes-claude-$pid.log"
+
+  set +e
+  output=$(TMPDIR="$TEST_TMP" FRESHEYES_LOG_DIR="$spaced_local" FRESHEYES_GLOBAL_LOG_DIR="$spaced_global" bash "$PROGRESS_SCRIPT" --result "$pid" 2>&1)
+  status=$?
+  set -e
+  if [[ "$output" == *"$ESCAPE_LEAK"* ]]; then
+    fail "ambiguous glob across spaced roots: --result delivered one run's review: $output"
+  fi
+  assert_equals "$status" "5" "ambiguous glob across spaced roots exit code"
+}
+
 test_alive_claude_sidecars_missing_log
 test_alive_claude_sidecars_empty_log
 test_legacy_no_pid_preserves_numeric_progress
@@ -730,5 +755,6 @@ test_locator_sidecar_symlink_escape_is_refused
 test_glob_symlink_escape_is_refused
 test_ambiguous_glob_is_refused
 test_ambiguous_glob_across_roots_is_refused
+test_ambiguous_glob_across_roots_with_spaces_is_refused
 
 printf 'fresheyes-progress tests passed\n'

@@ -273,8 +273,8 @@ _find_base_for_pid() {
   local dir
   local candidate_dirs=("$LOG_DIR")
   local searched_dirs=()
-  local seen=" "
-  local real
+  local seen_real=()
+  local real seen
 
   if [[ "$GLOBAL_LOG_DIR" != "$LOG_DIR" ]]; then
     candidate_dirs+=("$GLOBAL_LOG_DIR")
@@ -288,10 +288,10 @@ _find_base_for_pid() {
   for dir in "${candidate_dirs[@]}"; do
     if [[ -d "$dir" ]]; then
       real=$(cd "$dir" 2>/dev/null && pwd -P) || continue
-      case "$seen" in
-        *" $real "*) continue ;;
-      esac
-      seen="$seen$real "
+      for seen in "${seen_real[@]+"${seen_real[@]}"}"; do
+        [[ "$seen" == "$real" ]] && continue 2
+      done
+      seen_real+=("$real")
       searched_dirs+=("$dir")
     fi
   done
