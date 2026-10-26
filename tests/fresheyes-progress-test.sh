@@ -729,6 +729,23 @@ test_ambiguous_glob_across_roots_with_spaces_is_refused() {
   assert_equals "$status" "5" "ambiguous glob across spaced roots exit code"
 }
 
+test_legacy_active_escape_is_refused() {
+  local output status
+  mkdir -p "$LOG_DIR"
+  write_escape_target "$TEST_TMP/outside-active.md"
+  write_legacy_active "$LOG_DIR/../outside-active.md"
+
+  set +e
+  output=$(run_progress --result 2>&1)
+  status=$?
+  set -e
+  if [[ "$output" == *"$ESCAPE_LEAK"* ]]; then
+    fail "legacy .active escape: --result delivered the escaping target: $output"
+  fi
+  assert_equals "$status" "5" "legacy .active escape --result exit code"
+  rm -f "$LOG_DIR/.active"
+}
+
 test_alive_claude_sidecars_missing_log
 test_alive_claude_sidecars_empty_log
 test_legacy_no_pid_preserves_numeric_progress
@@ -756,5 +773,6 @@ test_glob_symlink_escape_is_refused
 test_ambiguous_glob_is_refused
 test_ambiguous_glob_across_roots_is_refused
 test_ambiguous_glob_across_roots_with_spaces_is_refused
+test_legacy_active_escape_is_refused
 
 printf 'fresheyes-progress tests passed\n'

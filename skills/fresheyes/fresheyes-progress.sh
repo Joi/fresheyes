@@ -335,7 +335,10 @@ _find_legacy_base() {
 
   local active_path
   active_path=$(cat "$active_file" 2>/dev/null)
-  if [[ -n "$active_path" ]] && _related_file_exists "$active_path"; then
+  if [[ -z "$active_path" ]] || ! _tracker_target_allowed "$LOG_DIR" "$active_path"; then
+    return 1
+  fi
+  if _related_file_exists "$active_path"; then
     printf '%s\n' "$active_path"
     return 0
   fi
