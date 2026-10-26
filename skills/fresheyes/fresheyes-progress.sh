@@ -179,10 +179,35 @@ _tracker_path() {
   _base_from_related_path "$tracked_path"
 }
 
-_path_is_under_dir() {
-  local path="$1"
-  local dir="${2%/}"
-  [[ "$path" == "$dir"/* ]]
+# Containment is decided on RESOLVED paths. A string prefix match on the
+# tracked path lets `<dir>/../outside.md` through, and the later `-f` tests
+# follow symlinks, so `<dir>/fresheyes-x.log -> /anywhere` got through as well;
+# either way the target's text was delivered as the review. The base and
+# every sidecar this script reads from it must resolve inside a log root.
+_base_resolves_under() {
+  python3 - "$@" <<'PYPATH'
+import os
+import sys
+
+base = sys.argv[1]
+roots = []
+for candidate in sys.argv[2:]:
+    if candidate:
+        roots.append(os.path.realpath(candidate).rstrip(os.sep) + os.sep)
+
+def inside(path):
+    real = os.path.realpath(path)
+    return any(real.startswith(root) for root in roots)
+
+if not inside(base):
+    raise SystemExit(1)
+for suffix in (".events.jsonl", ".stream.jsonl", ".stderr", ".status.json",
+               ".launch.stderr", ".result.md"):
+    path = base + suffix
+    if os.path.lexists(path) and not inside(path):
+        raise SystemExit(1)
+raise SystemExit(0)
+PYPATH
 }
 
 _tracker_target_allowed() {
@@ -193,15 +218,7 @@ _tracker_target_allowed() {
     return 0
   fi
 
-  if _path_is_under_dir "$tracked_path" "$dir"; then
-    return 0
-  fi
-
-  if _path_is_under_dir "$tracked_path" "$GLOBAL_LOG_DIR"; then
-    return 0
-  fi
-
-  return 1
+  _base_resolves_under "$tracked_path" "$dir" "$GLOBAL_LOG_DIR"
 }
 
 _find_base_for_pid_in_dir() {
@@ -243,11 +260,22 @@ _find_base_for_pid_in_dir() {
     return 1
   fi
 
-  newest=$(ls -t "${matches[@]}" 2>/dev/null | head -1)
-  if [[ -z "$newest" ]]; then
+  # Two runs whose names end in the same pid both match. Taking the newest
+  # would let one run answer the other's poll, so an ambiguous glob resolves
+  # to nothing (exit 2 stops the search in the other log roots too).
+  local match base
+  for match in "${matches[@]}"; do
+    base=$(_base_from_related_path "$match")
+    if [[ -z "$newest" ]]; then
+      newest="$base"
+    elif [[ "$base" != "$newest" ]]; then
+      return 2
+    fi
+  done
+  if ! _tracker_target_allowed "$dir" "$newest"; then
     return 1
   fi
-  _base_from_related_path "$newest"
+  printf '%s\n' "$newest"
 }
 
 _find_base_for_pid() {
@@ -264,8 +292,13 @@ _find_base_for_pid() {
 
   for dir in "${candidate_dirs[@]}"; do
     if [[ -d "$dir" ]]; then
-      if _find_base_for_pid_in_dir "$dir" "$pid"; then
+      local rc=0
+      _find_base_for_pid_in_dir "$dir" "$pid" || rc=$?
+      if [[ "$rc" -eq 0 ]]; then
         return 0
+      fi
+      if [[ "$rc" -eq 2 ]]; then
+        return 1
       fi
     fi
   done
