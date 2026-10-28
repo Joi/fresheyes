@@ -510,8 +510,9 @@ if provider_events:
     record["provider_events"] = provider_events
 if last_provider_event:
     record["last_provider_event"] = last_provider_event
-if state == "handle_mismatch":
-    # The result was refused: it must not carry a verdict, from either source.
+if state in ("handle_mismatch", "unreviewed"):
+    # The result was refused, or reviewed nothing: it must not carry a verdict,
+    # from either source. A status.json with no state can still hold one.
     record.pop("verdict", None)
 elif verdict:
     record["verdict"] = verdict
@@ -899,6 +900,7 @@ elif [[ -z "$STATUS_STATE" && -n "$VERDICT" && "$_HANDLE_STATUS" != "6" ]] && re
   # No readable status.json, so the verdict above came from the result itself.
   # The launcher would have recorded this result as `unreviewed` with no
   # verdict; a missing or malformed status file must not turn it into a pass.
+  # A finished result with no verdict is caught before `died` below.
   REVIEW_STATE="unreviewed"
   STATE_EXIT_CODE=7
   VERDICT=""
@@ -944,6 +946,13 @@ elif [[ -z "$STATUS_STATE" && ! -s "$LOG_FILE" && -n "$PID" ]] && ! _owner_alive
 elif [[ -z "$PID" ]]; then
   # Legacy no-handle invocation has no liveness signal; preserve old default.
   REVIEW_STATE="running"
+elif [[ -z "$STATUS_STATE" && "$_HANDLE_STATUS" != "6" ]] && result_examined_no_files "$LOG_FILE"; then
+  # The run is over and left no readable status.json or verdict. The launcher
+  # checks for no files whether or not there is a verdict, so this is its
+  # `unreviewed`, and --result prints the reviewer's explanation.
+  REVIEW_STATE="unreviewed"
+  STATE_EXIT_CODE=7
+  MESSAGE="$UNREVIEWED_MESSAGE"
 else
   REVIEW_STATE="died"
   STATE_EXIT_CODE=4
