@@ -395,6 +395,15 @@ detect_manual_verdict() {
   fi
 }
 
+# True when the run's result says it examined no files. The launcher records
+# that as state `unreviewed`; without a readable status.json the poller reads
+# the same result and must reach the same answer.
+result_examined_no_files() {
+  local review_file
+  review_file=$(resolve_result_file "$1")
+  python3 "$VERDICT_PARSER" --no-files-examined "$review_file" 2>/dev/null
+}
+
 print_final_review_if_nonempty() {
   local base="$1"
   local review_file
@@ -925,6 +934,7 @@ fi
 
 MESSAGE=""
 STATE_EXIT_CODE=0
+UNREVIEWED_MESSAGE="unreviewed — the reviewer examined no files, so this is not a completed review. --result prints what the reviewer said; re-run the review, and if it repeats, the reviewer cannot read the repository."
 _mismatch_message() {
   local foreign="${1:-}"
   local result_file
@@ -954,11 +964,19 @@ elif [[ "$STATUS_STATE" == "unreviewed" && "$_HANDLE_STATUS" != "6" ]]; then
   # this run's and is returned by --result, but it is not a completed review.
   REVIEW_STATE="unreviewed"
   STATE_EXIT_CODE=7
-  MESSAGE="unreviewed — the reviewer examined no files, so this is not a completed review. --result prints what the reviewer said; re-run the review, and if it repeats, the reviewer cannot read the repository."
+  MESSAGE="$UNREVIEWED_MESSAGE"
 elif [[ "$STATUS_STATE" == "unreviewed" ]]; then
   REVIEW_STATE="handle_mismatch"
   STATE_EXIT_CODE=6
   MESSAGE=$(_mismatch_message "$RESULT_HANDLE")
+elif [[ -z "$STATUS_STATE" && -n "$VERDICT" && "$_HANDLE_STATUS" != "6" ]] && result_examined_no_files "$LOG_FILE"; then
+  # No readable status.json, so the verdict above came from the result itself.
+  # The launcher would have recorded this result as `unreviewed` with no
+  # verdict; a missing or malformed status file must not turn it into a pass.
+  REVIEW_STATE="unreviewed"
+  STATE_EXIT_CODE=7
+  VERDICT=""
+  MESSAGE="$UNREVIEWED_MESSAGE"
 elif [[ "$STATUS_STATE" == "complete" || -n "$VERDICT" ]]; then
   REVIEW_STATE="complete"
   # The verification above is this script's own, whatever status.json claims:
