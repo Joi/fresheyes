@@ -203,8 +203,11 @@ marker and the run's own marker reached `complete` with verdict `passed`,
 where the runner would have recorded `unreviewed`. The poller now runs
 `fresheyes-verdict.py --no-files-examined` on the same result file it read the
 verdict from, the `.result.md` sidecar for a GPT run, and reports
-`unreviewed` with exit 7 from `--json` and `--result`. A handle mismatch still
-wins.
+`unreviewed` with exit 7 from `--json` and `--result`. A finished run with no
+verdict at all gets the same check before it is reported `died`, since the
+runner checks for no files whether or not there is a verdict. A status file
+that parses but records no state counts as missing, and its `verdict` field no
+longer reaches the JSON. A handle mismatch still wins.
 
 ## Making a fix
 
@@ -299,7 +302,7 @@ Never run `fresheyes.sh --help`, or any flag it does not know: it takes the
 flag as the review scope and launches a real review (upstream #6).
 
 All ten files pass on macOS as of 2026-10-28 on the merge of
-`fix/unreviewed-exit-code` for kata jibot-code#1ys6, 61fcd26 (macct:
+`fix/unreviewed-exit-code` for kata jibot-code#1ys6, 8ae597a (macct:
 `/bin/bash` 3.2.57, Homebrew git 2.55.0), and on Linux (Lima on macct, Ubuntu
 24.04, bash 5.2.21, git 2.43.0) against the same commit.
 All ten files passed on macOS as of 2026-10-26 on the merge that became
