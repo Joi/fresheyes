@@ -194,6 +194,18 @@ One limit is deliberate: a result with no run marker at all, read by the poller
 without a `status.json`, is a pre-binding result and still takes its last
 flush-left marker.
 
+Since `fleet-2026.10.28` the poller applies the no-files check when it has no
+readable `status.json` (kata jibot-code#1ys6, a commit on
+`fix/unreviewed-exit-code`, so upstream pull request 34 carries it). Before
+that, a missing or malformed status file sent the poller to read the verdict
+off the result alone, and a result with "Files Examined: None.", a PASSED
+marker and the run's own marker reached `complete` with verdict `passed`,
+where the runner would have recorded `unreviewed`. The poller now runs
+`fresheyes-verdict.py --no-files-examined` on the same result file it read the
+verdict from, the `.result.md` sidecar for a GPT run, and reports
+`unreviewed` with exit 7 from `--json` and `--result`. A handle mismatch still
+wins.
+
 ## Making a fix
 
 ```bash
@@ -286,7 +298,11 @@ and start no real review.
 Never run `fresheyes.sh --help`, or any flag it does not know: it takes the
 flag as the review scope and launches a real review (upstream #6).
 
-All ten files pass on macOS as of 2026-10-26 on the merge that became
+All ten files pass on macOS as of 2026-10-28 on the merge of
+`fix/unreviewed-exit-code` for kata jibot-code#1ys6, 61fcd26 (macct:
+`/bin/bash` 3.2.57, Homebrew git 2.55.0), and on Linux (Lima on macct, Ubuntu
+24.04, bash 5.2.21, git 2.43.0) against the same commit.
+All ten files passed on macOS as of 2026-10-26 on the merge that became
 `fleet-2026.10.26.3` (macct: `/bin/bash` 3.2.57, Homebrew git 2.55.0), and on
 Linux (Lima on macct, Ubuntu 24.04, bash 5.2.21, git 2.43.0) against the same
 commit.
