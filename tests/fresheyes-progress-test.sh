@@ -605,6 +605,101 @@ TEXT
   assert_contains "$output" "INDEPENDENT CODE REVIEW PASSED" "record with no handle is still delivered"
 }
 
+# Without a readable status.json the poller reads the verdict off the result
+# itself. A result whose Files Examined list names no file is the launcher's
+# `unreviewed` (exit 7, no verdict), so the poller must not report it complete.
+assert_unreviewed_without_status() {
+  local handle="$1"
+  local label="$2"
+  local output status
+  set +e
+  output=$(run_progress --json "$handle")
+  status=$?
+  set -e
+  assert_equals "$status" "7" "$label JSON exit code"
+  assert_json_field_equals "$output" "state" "unreviewed" "$label JSON state"
+  if [[ "$(json_field "$output" "verdict" 2>/dev/null || true)" =~ ^(passed|failed)$ ]]; then
+    fail "$label reported a verdict: $output"
+  fi
+
+  set +e
+  output=$(run_progress --result "$handle" 2>&1)
+  status=$?
+  set -e
+  assert_equals "$status" "7" "$label --result exit code"
+  assert_contains "$output" "unreviewed" "$label --result names the state"
+}
+
+test_no_files_without_status_is_unreviewed() {
+  local pid base
+  dead_pid pid
+  base="$LOG_DIR/fresheyes-test-$pid.log"
+  write_active "$pid" "$base"
+  cat > "$base" <<'TEXT'
+## Files Examined
+
+None.
+
+INDEPENDENT CODE REVIEW PASSED
+TEXT
+
+  assert_unreviewed_without_status "$pid" "no files, no status.json"
+}
+
+test_no_files_with_malformed_status_is_unreviewed() {
+  local pid base
+  dead_pid pid
+  base="$LOG_DIR/fresheyes-test-$pid.log"
+  write_active "$pid" "$base"
+  cat > "$base" <<'TEXT'
+## Files Examined
+
+None.
+
+INDEPENDENT CODE REVIEW PASSED
+TEXT
+  printf '{"state":"complete","verdict":"passed"\n' > "$base.status.json"
+
+  assert_unreviewed_without_status "$pid" "no files, malformed status.json"
+}
+
+test_no_files_with_run_marker_is_unreviewed() {
+  local handle base
+  handle="20260303-131313-ffffff"
+  base="$LOG_DIR/fresheyes-$handle.log"
+  mkdir -p "$LOG_DIR"
+  cat > "$base" <<TEXT
+## Files Examined
+
+None.
+
+INDEPENDENT CODE REVIEW PASSED
+FRESHEYES-RUN: $handle
+TEXT
+  write_locator_alias "$handle" "$base"
+
+  assert_unreviewed_without_status "$handle" "no files, run marker"
+}
+
+test_files_examined_without_status_stays_complete() {
+  local pid base output
+  dead_pid pid
+  base="$LOG_DIR/fresheyes-test-$pid.log"
+  write_active "$pid" "$base"
+  cat > "$base" <<'TEXT'
+## Files Examined
+
+- README.md
+
+INDEPENDENT CODE REVIEW PASSED
+TEXT
+  printf 'not json\n' > "$base.status.json"
+
+  output=$(run_progress --json "$pid")
+  assert_json_field_equals "$output" "state" "complete" "files examined, malformed status.json"
+  assert_json_field_equals "$output" "verdict" "passed" "files examined, malformed status.json verdict"
+}
+
 test_alive_claude_sidecars_missing_log
 test_alive_claude_sidecars_empty_log
 test_legacy_no_pid_preserves_numeric_progress
@@ -625,5 +720,9 @@ test_parent_alias_no_longer_resolves
 test_progress_is_read_only
 test_foreign_marker_is_refused
 test_record_without_handle_is_delivered
+test_no_files_without_status_is_unreviewed
+test_no_files_with_malformed_status_is_unreviewed
+test_no_files_with_run_marker_is_unreviewed
+test_files_examined_without_status_stays_complete
 
 printf 'fresheyes-progress tests passed\n'
