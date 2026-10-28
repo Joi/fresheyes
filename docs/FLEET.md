@@ -254,11 +254,29 @@ it.
 ```bash
 failed=0
 for t in tests/*.sh; do
-  bash "$t" >"/tmp/$(basename "$t").log" 2>&1 </dev/null
-  rc=$?; echo "$t rc=$rc"; [ "$rc" -eq 0 ] || failed=1
+  log="/tmp/$(basename "$t").log"
+  if ! bash -n "$t" 2>"$log"; then
+    rc=2
+  else
+    bash "$t" >"$log" 2>&1 </dev/null
+    rc=$?
+    if [ "$rc" -eq 0 ] && ! tail -n 1 "$log" | grep -Eq '(tests passed| passed, 0 failed)$'; then rc=1; fi
+  fi
+  echo "$t rc=$rc"; [ "$rc" -eq 0 ] || failed=1
 done
 [ "$failed" -eq 0 ]    # the loop's own status says nothing; this line does
 ```
+
+A file's exit status alone is not evidence that it ran. Nine of the ten files
+set an EXIT trap that removes their temp directory, and when bash 3.2 meets a
+syntax error it runs that trap and exits with the trap's status, 0, having run
+no test (kata
+jibot-code#0bts: a merge that dropped a closing brace in
+`fresheyes-progress-test.sh` reported `rc=0`). Saving `$?` inside the trap does
+not help, because bash 3.2 enters the trap with `$?` already 0. So the loop
+checks the syntax first (`rc=2`) and requires the file's last line to be its
+`tests passed` or `passed, 0 failed` line (`rc=1` without it). A new test file
+ends with one of those two lines, or this loop fails it.
 
 Unset `FRESHEYES_GPT_MODEL`, `FRESHEYES_MODEL`, `FRESHEYES_CLAUDE_MODEL`,
 `FRESHEYES_PROVIDER` and `FRESHEYES_REASONING` first, or the fleet's shell pins
@@ -332,7 +350,7 @@ tree under test is not the working tree:
 limactl start --name=fe-test --vm-type=vz --mount-none --tty=false template://ubuntu-24.04
 limactl shell fe-test mkdir -p /tmp/t
 git archive <commit> | limactl shell fe-test tar -x -C /tmp/t
-limactl shell fe-test bash -c 'cd /tmp/t && for t in tests/*.sh; do bash "$t" >/dev/null 2>&1 </dev/null; echo "$t rc=$?"; done'
+limactl shell fe-test bash -c 'cd /tmp/t && for t in tests/*.sh; do bash -n "$t" && bash "$t" >/tmp/t.log 2>&1 </dev/null && tail -n 1 /tmp/t.log | grep -Eq "(tests passed| passed, 0 failed)$"; echo "$t rc=$?"; done'
 limactl delete -f fe-test
 ```
 
