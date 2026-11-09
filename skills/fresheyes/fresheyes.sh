@@ -138,6 +138,16 @@ case "$PROVIDER" in
       echo "Error: FRESHEYES_LOCAL_PROVIDER_ID must be letters, digits, _ or - (got '$LOCAL_PROVIDER_ID')." >&2
       exit 1
     fi
+    # Codex registers its built-in providers first and keeps them when a
+    # configured provider has the same id, so a built-in id would send the
+    # review to that provider (OpenAI's servers, for `openai`) under a "local"
+    # label. Refuse them.
+    case "$LOCAL_PROVIDER_ID" in
+      openai|openai-chat-completions|ollama|lmstudio|oss)
+        echo "Error: FRESHEYES_LOCAL_PROVIDER_ID '$LOCAL_PROVIDER_ID' is a Codex built-in provider id, which Codex would use instead of the local definition; choose another id." >&2
+        exit 1
+        ;;
+    esac
     if [[ "$LOCAL_BASE_URL" == *[\"\\]* ]]; then
       echo "Error: FRESHEYES_LOCAL_BASE_URL must not contain quotes or backslashes." >&2
       exit 1
@@ -645,6 +655,7 @@ launch_via_systemd_run() {
              FRESHEYES_PROVIDER FRESHEYES_GPT_MODEL FRESHEYES_CLAUDE_MODEL \
              FRESHEYES_MODEL FRESHEYES_CODEX_BIN FRESHEYES_CLAUDE_BIN \
              FRESHEYES_LOCAL_BASE_URL FRESHEYES_LOCAL_MODEL FRESHEYES_LOCAL_PROVIDER_ID \
+             FRESHEYES_REASONING FRESHEYES_CODEX_IGNORE_USER_CONFIG \
              FRESHEYES_HEARTBEAT_SECS FRESHEYES_VERSION_PROBE_TIMEOUT TMPDIR \
              HTTP_PROXY HTTPS_PROXY NO_PROXY http_proxy https_proxy no_proxy \
              ALL_PROXY SSL_CERT_FILE SSL_CERT_DIR REQUESTS_CA_BUNDLE \
@@ -1030,7 +1041,7 @@ if [[ "$PROVIDER" == "local" ]]; then
     # A local server prefills long contexts slowly; 30 minutes before Codex
     # gives up on a silent stream.
     -c "model_providers.$LOCAL_PROVIDER_ID.stream_idle_timeout_ms=1800000"
-    -c "model_provider=$LOCAL_PROVIDER_ID"
+    -c "model_provider=\"$LOCAL_PROVIDER_ID\""
   )
 fi
 
