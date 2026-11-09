@@ -549,10 +549,12 @@ if argv[model_index + 1] != "/srv/models/example-model":
 for expected in (
     'model_providers.examplebox.base_url="http://models.example:8080/v1"',
     'model_providers.examplebox.wire_api="responses"',
-    "model_provider=examplebox",
+    'model_provider="examplebox"',
 ):
     if expected not in argv:
         raise SystemExit(f"--local did not pass {expected!r} on the codex exec line: {argv!r}")
+if "model_provider=examplebox" in argv:
+    raise SystemExit(f"model_provider must be a quoted TOML string, or an id like 123 would parse as a number: {argv!r}")
 if "model_reasoning_effort=xhigh" not in argv:
     raise SystemExit(f"--local manual review did not keep the manual reasoning level: {argv!r}")
 PY
@@ -560,6 +562,60 @@ PY
 if ! grep -q '^INDEPENDENT CODE REVIEW PASSED$' "$STDOUT_FILE"; then
   printf -- '--local manual review did not return the passing review:\n' >&2
   cat "$STDOUT_FILE" >&2
+  exit 1
+fi
+
+# --local in automatic mode goes through the same Codex launch with the schema.
+rm -f "$ARGV_FILE"
+LOCAL_AUTO_OUT="$TEST_TMP/local-automatic.txt"
+PATH="$FAKE_BIN:$PATH" \
+  FRESHEYES_FAKE_ARGV="$ARGV_FILE" \
+  FRESHEYES_LOG_DIR="$TEST_TMP/logs" \
+  FRESHEYES_GLOBAL_LOG_DIR="$TEST_TMP/global-logs" \
+  FRESHEYES_FAKE_VERSION_PROBE="$VERSION_PROBE_FILE" \
+  FRESHEYES_LOCAL_BASE_URL="http://models.example:8080/v1" \
+  FRESHEYES_LOCAL_MODEL="/srv/models/example-model" \
+  FRESHEYES_LOCAL_PROVIDER_ID=examplebox \
+  timeout 30s bash "$RUNNER" --local --automatic "Review README.md." > "$LOCAL_AUTO_OUT"
+
+python3 - "$ARGV_FILE" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    argv = json.load(handle)
+
+if "--output-schema" not in argv:
+    raise SystemExit(f"--local automatic review did not request the schema: {argv!r}")
+if 'model_provider="examplebox"' not in argv or "model_reasoning_effort=medium" not in argv:
+    raise SystemExit(f"--local automatic review lost the provider or the medium reasoning level: {argv!r}")
+if argv[argv.index("--model") + 1] != "/srv/models/example-model":
+    raise SystemExit(f"--local automatic review did not send the local model: {argv!r}")
+PY
+if ! grep -q 'approved' "$LOCAL_AUTO_OUT"; then
+  printf -- '--local automatic review did not report the approval:\n' >&2
+  cat "$LOCAL_AUTO_OUT" >&2
+  exit 1
+fi
+
+# A Codex built-in provider id would route the review to that provider under
+# a "local" label; the runner refuses it before launch.
+set +e
+PATH="$FAKE_BIN:$PATH" \
+  FRESHEYES_FAKE_ARGV="$ARGV_FILE" \
+  FRESHEYES_LOG_DIR="$TEST_TMP/logs" \
+  FRESHEYES_GLOBAL_LOG_DIR="$TEST_TMP/global-logs" \
+  FRESHEYES_FAKE_VERSION_PROBE="$VERSION_PROBE_FILE" \
+  FRESHEYES_LOCAL_BASE_URL="http://models.example:8080/v1" \
+  FRESHEYES_LOCAL_MODEL="/srv/models/example-model" \
+  FRESHEYES_LOCAL_PROVIDER_ID=openai \
+  FRESHEYES_MODE=manual \
+  timeout 30s bash "$RUNNER" --foreground --local "Review README.md." > "$STDOUT_FILE" 2> "$TEST_TMP/local-reserved.txt"
+status=$?
+set -e
+if [[ "$status" -ne 1 ]] || ! grep -q 'built-in provider id' "$TEST_TMP/local-reserved.txt"; then
+  printf -- '--local with a built-in provider id must refuse (status %s):\n' "$status" >&2
+  cat "$TEST_TMP/local-reserved.txt" >&2
   exit 1
 fi
 
