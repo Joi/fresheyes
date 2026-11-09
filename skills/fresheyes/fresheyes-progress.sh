@@ -374,7 +374,7 @@ resolve_result_file() {
   local provider mode
   provider=$(status_file_field "$base" "provider" 2>/dev/null || true)
   mode=$(status_file_field "$base" "mode" 2>/dev/null || true)
-  if [[ -s "$base.result.md" ]] && [[ -z "$provider" || ( "$provider" == "gpt" && "$mode" == "manual" ) ]]; then
+  if [[ -s "$base.result.md" ]] && [[ -z "$provider" || ( ( "$provider" == "gpt" || "$provider" == "local" ) && "$mode" == "manual" ) ]]; then
     printf '%s\n' "$base.result.md"
     return 0
   fi

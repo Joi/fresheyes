@@ -47,7 +47,9 @@ Default to a **different model family** from yourself — model diversity improv
 - **You are Claude** → use `--gpt`
 - **You are GPT/Codex** → use `--claude`
 - **You are neither** → use `--gpt`
-- **User explicitly requests a provider** → honor it (`--gpt` or `--claude`)
+- **User explicitly requests a provider** → honor it (`--gpt`, `--claude` or `--local`)
+
+`--local` runs the review through Codex against an OpenAI-compatible server you run yourself (vLLM, llama.cpp, mlx); it needs `FRESHEYES_LOCAL_BASE_URL` and `FRESHEYES_LOCAL_MODEL` set (see the README) and is for material that may not leave your machines. Use it only when the user asks for it or the environment names it as the reviewer for the repository.
 
 GPT reviews default to **gpt-5.6-sol**. Use Astra only when the user explicitly requests it for that review, by setting `FRESHEYES_GPT_MODEL=gpt-6-astra` on that invocation. Do not escalate to Astra automatically or persist that override in an unattended workflow.
 
@@ -62,7 +64,7 @@ The script path is `fresheyes.sh` inside this skill's base directory (shown at t
 Run it as a plain foreground command:
 
 ```bash
-bash "<base-directory>/fresheyes.sh" [--gpt|--claude] "<scope from step 2>"
+bash "<base-directory>/fresheyes.sh" [--gpt|--claude|--local] "<scope from step 2>"
 ```
 
 Manual reviews detach automatically, so this returns within a couple of seconds and prints exactly two lines:

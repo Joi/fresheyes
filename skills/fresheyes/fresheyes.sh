@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Fresh Eyes - Independent Code Review runner
-# Usage: ./fresheyes.sh [--gpt|--claude|--provider PROVIDER] [--manual|--automatic] [--foreground]
+# Usage: ./fresheyes.sh [--gpt|--claude|--local|--provider PROVIDER] [--manual|--automatic] [--foreground]
 #                       [--since COMMIT] [--rebuttals FILE] ['scope text']
+# --local reviews through codex exec against an OpenAI-compatible server you run yourself:
+# FRESHEYES_LOCAL_BASE_URL (its /v1 base, Responses API) and FRESHEYES_LOCAL_MODEL (its model id) are required.
 # Manual mode detaches into its own session by default (prints FRESHPID=<pid>); --foreground runs synchronously.
 # --since COMMIT reviews only git diff COMMIT..HEAD (a later round after fixes) and builds the scope itself.
 # --rebuttals FILE gives the reviewer findings the caller declined earlier, with the caller's reasons.
@@ -41,9 +43,13 @@ while [[ $# -gt 0 ]]; do
       PROVIDER="claude"
       shift
       ;;
+    --local)
+      PROVIDER="local"
+      shift
+      ;;
     --provider)
       if [[ $# -lt 2 ]]; then
-        echo "Error: --provider requires a value (gpt|claude)." >&2
+        echo "Error: --provider requires a value (gpt|claude|local)." >&2
         exit 1
       fi
       PROVIDER="$2"
@@ -109,8 +115,34 @@ case "$PROVIDER" in
     MODEL="${FRESHEYES_CLAUDE_MODEL:-${FRESHEYES_MODEL:-claude-fable-5-1}}"
     PROVIDER_LABEL="Claude"
     ;;
+  local)
+    # Codex CLI against a server you run yourself (vLLM, llama.cpp, mlx, ...).
+    # The provider is defined on the codex exec line, not in config.toml, so it
+    # also works under FRESHEYES_CODEX_IGNORE_USER_CONFIG=1 and needs no install
+    # step. The server must speak the Responses API: Codex 0.159 dropped
+    # wire_api = "chat". FRESHEYES_MODEL is not consulted: a GPT name pinned
+    # there must never be sent to a local server.
+    LOCAL_BASE_URL="${FRESHEYES_LOCAL_BASE_URL:-}"
+    MODEL="${FRESHEYES_LOCAL_MODEL:-}"
+    if [[ -z "$LOCAL_BASE_URL" || -z "$MODEL" ]]; then
+      echo "Error: --local needs FRESHEYES_LOCAL_BASE_URL (the server's /v1 base URL) and FRESHEYES_LOCAL_MODEL (its model id)." >&2
+      exit 1
+    fi
+    LOCAL_PROVIDER_ID="${FRESHEYES_LOCAL_PROVIDER_ID:-local}"
+    # Both are spliced into TOML on the codex command line: the id as a bare
+    # table key, the URL inside a quoted string.
+    if [[ ! "$LOCAL_PROVIDER_ID" =~ ^[A-Za-z0-9_-]+$ ]]; then
+      echo "Error: FRESHEYES_LOCAL_PROVIDER_ID must be letters, digits, _ or - (got '$LOCAL_PROVIDER_ID')." >&2
+      exit 1
+    fi
+    if [[ "$LOCAL_BASE_URL" == *[\"\\]* ]]; then
+      echo "Error: FRESHEYES_LOCAL_BASE_URL must not contain quotes or backslashes." >&2
+      exit 1
+    fi
+    PROVIDER_LABEL="local ($LOCAL_PROVIDER_ID ${MODEL##*/})"
+    ;;
   *)
-    echo "Error: Unknown provider '$PROVIDER'. Use gpt or claude." >&2
+    echo "Error: Unknown provider '$PROVIDER'. Use gpt, claude or local." >&2
     exit 1
     ;;
 esac
@@ -209,7 +241,7 @@ probe_version() {
 }
 
 # --- CLI prerequisite check ---
-if [[ "$PROVIDER" == "gpt" ]]; then
+if [[ "$PROVIDER" == "gpt" || "$PROVIDER" == "local" ]]; then
   if [[ "${FRESHEYES_DAEMONIZED:-0}" == "1" && -n "${FRESHEYES_CODEX_BIN:-}" ]]; then
     # Parent already validated the CLI + version; cheap re-check only.
     if [[ ! -x "$FRESHEYES_CODEX_BIN" ]]; then
@@ -479,7 +511,7 @@ LAUNCH_STDERR="$LOG_FILE.launch.stderr"
 # other artifact.
 if [[ "$MODE" == "automatic" ]]; then
   RESULT_PATH="$LOG_DIR/fresheyes-automatic-$HANDLE.json"
-elif [[ "$PROVIDER" == "gpt" ]]; then
+elif [[ "$PROVIDER" == "gpt" || "$PROVIDER" == "local" ]]; then
   RESULT_PATH="$RESULT_FILE"
 else
   RESULT_PATH="$LOG_FILE"
@@ -609,6 +641,7 @@ launch_via_systemd_run() {
   for var in FRESHEYES_LOG_DIR FRESHEYES_GLOBAL_LOG_DIR FRESHEYES_MODE \
              FRESHEYES_PROVIDER FRESHEYES_GPT_MODEL FRESHEYES_CLAUDE_MODEL \
              FRESHEYES_MODEL FRESHEYES_CODEX_BIN FRESHEYES_CLAUDE_BIN \
+             FRESHEYES_LOCAL_BASE_URL FRESHEYES_LOCAL_MODEL FRESHEYES_LOCAL_PROVIDER_ID \
              FRESHEYES_HEARTBEAT_SECS FRESHEYES_VERSION_PROBE_TIMEOUT TMPDIR \
              HTTP_PROXY HTTPS_PROXY NO_PROXY http_proxy https_proxy no_proxy \
              ALL_PROXY SSL_CERT_FILE SSL_CERT_DIR REQUESTS_CA_BUNDLE \
@@ -982,6 +1015,21 @@ CODEX_USER_CONFIG_FLAG=""
 if [[ "${FRESHEYES_CODEX_IGNORE_USER_CONFIG:-0}" == "1" ]]; then
   CODEX_USER_CONFIG_FLAG="--ignore-user-config"
 fi
+# --local: the whole provider as -c overrides, so no config.toml is consulted.
+# Expanded with the ${arr[@]+...} form because an empty array under set -u is
+# an error on bash 3.2 (macOS /bin/bash).
+CODEX_PROVIDER_ARGS=()
+if [[ "$PROVIDER" == "local" ]]; then
+  CODEX_PROVIDER_ARGS=(
+    -c "model_providers.$LOCAL_PROVIDER_ID.name=\"$LOCAL_PROVIDER_ID\""
+    -c "model_providers.$LOCAL_PROVIDER_ID.base_url=\"$LOCAL_BASE_URL\""
+    -c "model_providers.$LOCAL_PROVIDER_ID.wire_api=\"responses\""
+    # A local server prefills long contexts slowly; 30 minutes before Codex
+    # gives up on a silent stream.
+    -c "model_providers.$LOCAL_PROVIDER_ID.stream_idle_timeout_ms=1800000"
+    -c "model_provider=$LOCAL_PROVIDER_ID"
+  )
+fi
 
 run_gpt_manual() {
   # --skip-git-repo-check: codex exec aborts when its working directory is not
@@ -989,6 +1037,7 @@ run_gpt_manual() {
   # (often via `git -C`), so the caller's CWD must not gate the review.
   if ! env -u FRESHEYES_HANDLE -u FRESHEYES_LOG_FILE "$CODEX_BIN" exec \
     $CODEX_USER_CONFIG_FLAG \
+    ${CODEX_PROVIDER_ARGS[@]+"${CODEX_PROVIDER_ARGS[@]}"} \
     --sandbox read-only \
     --skip-git-repo-check \
     --color never \
@@ -1014,6 +1063,7 @@ run_gpt_automatic() {
   # Codex writes schema-conforming JSON directly to the output file — no post-processing needed.
   if ! env -u FRESHEYES_HANDLE -u FRESHEYES_LOG_FILE "$CODEX_BIN" exec \
     $CODEX_USER_CONFIG_FLAG \
+    ${CODEX_PROVIDER_ARGS[@]+"${CODEX_PROVIDER_ARGS[@]}"} \
     --sandbox read-only \
     --skip-git-repo-check \
     --color never \
@@ -1198,7 +1248,7 @@ if [[ "$MODE" == "automatic" ]]; then
   OUTPUT_FILE="$RESULT_PATH"
 
   case "$PROVIDER" in
-    gpt)    run_gpt_automatic "$OUTPUT_FILE" ;;
+    gpt|local) run_gpt_automatic "$OUTPUT_FILE" ;;
     claude) run_claude_automatic "$OUTPUT_FILE" ;;
   esac
 
@@ -1289,7 +1339,7 @@ fi
 
 # --- Manual mode dispatch ---
 case "$PROVIDER" in
-  gpt)    run_gpt_manual ;;
+  gpt|local) run_gpt_manual ;;
   claude) run_claude_manual ;;
 esac
 
