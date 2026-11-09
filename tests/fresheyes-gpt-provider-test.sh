@@ -805,7 +805,7 @@ if argv[model_index + 1] != "/Users/joi/models/GLM-5.3-Flash-MLX-mixed-4_8bit":
     raise SystemExit(f"fleet --local default model is azbd3's GLM-5.3-Flash: {argv!r}")
 for expected in (
     'model_providers.azbd3.base_url="http://azbd3:8080/v1"',
-    "model_provider=azbd3",
+    'model_provider="azbd3"',
 ):
     if expected not in argv:
         raise SystemExit(f"fleet --local default did not pass {expected!r}: {argv!r}")
