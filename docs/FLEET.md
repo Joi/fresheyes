@@ -115,8 +115,9 @@ default lines against `routing.toml` and set either back by hand. The routing
 check catches a miss, and so does
 `test_fable_5_2_default_rejects_old_claude_code` in
 `tests/fresheyes-claude-provider-test.sh`. That test runs the default on Claude
-Code 2.1.318 and expects the Fable 5.2 gate's error (2.1.319, the oldest
-version that ran the id on a pool seat).
+Code 2.1.289 and expects the Fable 5.2 gate's error (2.1.290: the API refuses
+older CLIs with '400 ... version 2.1.290 or newer is required', seen on a
+2.1.280 cell image and a 2.1.267 jibotmac on 2026-11-10).
 
 The `--local` defaults are the third piece of fleet policy on this branch
 (kata jibot-code#c3r7, the first consumer of azbd3, jibot-code#ea1r). Upstream's

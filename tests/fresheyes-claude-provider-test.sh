@@ -663,7 +663,9 @@ test_fable_5_2_default_rejects_old_claude_code() {
   rm -f "$ARGV_FILE" "$ARGV_FILE.env"
 
   # The fork's default is Fable 5.2 (fleet routing, 2026-11-10), so with no
-  # model named its 2.1.319 gate applies: 2.1.318 is refused by name.
+  # model named its 2.1.290 gate applies (the API's own floor: Claude Code
+  # 2.1.280 gets '400 ... version 2.1.290 or newer is required'): 2.1.289 is
+  # refused by name.
   set +e
   TMPDIR="$run_tmp" \
     FRESHEYES_LOG_DIR="$run_tmp/fresheyes-logs" \
@@ -672,7 +674,7 @@ test_fable_5_2_default_rejects_old_claude_code() {
     FRESHEYES_MODEL= \
     FRESHEYES_REASONING= \
     FRESHEYES_CODEX_IGNORE_USER_CONFIG= \
-    FRESHEYES_FAKE_CLAUDE_VERSION="2.1.318" \
+    FRESHEYES_FAKE_CLAUDE_VERSION="2.1.289" \
     FRESHEYES_FAKE_CLAUDE_VERSION_PROBE="$VERSION_PROBE_FILE" \
     PATH="$FAKE_BIN:$PATH" \
     FRESHEYES_FAKE_ARGV="$ARGV_FILE" \
@@ -680,8 +682,8 @@ test_fable_5_2_default_rejects_old_claude_code() {
   status=$?
   set -e
 
-  [[ "$status" -ne 0 ]] || fail "default Claude review accepted unsupported Claude Code 2.1.318"
-  assert_contains "$(cat "$stderr_file")" "Claude Fable 5.2 requires Claude Code 2.1.319 or newer" "old Claude Code failure for the default"
+  [[ "$status" -ne 0 ]] || fail "default Claude review accepted unsupported Claude Code 2.1.289"
+  assert_contains "$(cat "$stderr_file")" "Claude Fable 5.2 requires Claude Code 2.1.290 or newer" "old Claude Code failure for the default"
 }
 
 test_fable_5_1_override_rejects_old_claude_code() {
