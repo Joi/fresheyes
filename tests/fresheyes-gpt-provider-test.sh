@@ -721,22 +721,38 @@ if ! grep -q '^INDEPENDENT CODE REVIEW PASSED$' "$STDOUT_FILE"; then
   exit 1
 fi
 
-set +e
+# Fleet policy on this branch: with none of the FRESHEYES_LOCAL_* variables set,
+# --local reviews on azbd3's GLM-5.3-Flash (kata jibot-code#c3r7). Upstream's
+# runner refuses instead; that case is on fix/local-codex-provider.
+rm -f "$ARGV_FILE"
 PATH="$FAKE_BIN:$PATH" \
   FRESHEYES_FAKE_ARGV="$ARGV_FILE" \
   FRESHEYES_LOG_DIR="$TEST_TMP/logs" \
   FRESHEYES_GLOBAL_LOG_DIR="$TEST_TMP/global-logs" \
   FRESHEYES_FAKE_VERSION_PROBE="$VERSION_PROBE_FILE" \
   FRESHEYES_LOCAL_BASE_URL= \
-  FRESHEYES_LOCAL_MODEL="/srv/models/example-model" \
+  FRESHEYES_LOCAL_MODEL= \
+  FRESHEYES_LOCAL_PROVIDER_ID= \
+  FRESHEYES_REASONING= \
   FRESHEYES_MODE=manual \
-  timeout 30s bash "$RUNNER" --foreground --provider local "Review README.md." > "$STDOUT_FILE" 2> "$TEST_TMP/local-missing.txt"
-status=$?
-set -e
-if [[ "$status" -ne 1 ]] || ! grep -q 'FRESHEYES_LOCAL_BASE_URL' "$TEST_TMP/local-missing.txt"; then
-  printf -- '--local without FRESHEYES_LOCAL_BASE_URL must fail with a named error (status %s):\n' "$status" >&2
-  cat "$TEST_TMP/local-missing.txt" >&2
-  exit 1
-fi
+  timeout 30s bash "$RUNNER" --foreground --provider local "Review README.md." > "$STDOUT_FILE"
+
+python3 - "$ARGV_FILE" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    argv = json.load(handle)
+
+model_index = argv.index("--model")
+if argv[model_index + 1] != "/Users/joi/models/GLM-5.3-Flash-MLX-mixed-4_8bit":
+    raise SystemExit(f"fleet --local default model is azbd3's GLM-5.3-Flash: {argv!r}")
+for expected in (
+    'model_providers.azbd3.base_url="http://azbd3:8080/v1"',
+    "model_provider=azbd3",
+):
+    if expected not in argv:
+        raise SystemExit(f"fleet --local default did not pass {expected!r}: {argv!r}")
+PY
 
 printf 'fresheyes-gpt-provider tests passed\n'

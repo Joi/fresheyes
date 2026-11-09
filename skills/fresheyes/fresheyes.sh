@@ -122,13 +122,16 @@ case "$PROVIDER" in
     # step. The server must speak the Responses API: Codex 0.159 dropped
     # wire_api = "chat". FRESHEYES_MODEL is not consulted: a GPT name pinned
     # there must never be sent to a local server.
-    LOCAL_BASE_URL="${FRESHEYES_LOCAL_BASE_URL:-}"
-    MODEL="${FRESHEYES_LOCAL_MODEL:-}"
+    # Fleet policy (kata jibot-code#c3r7): the default local reviewer is
+    # GLM-5.3-Flash on azbd3, the Tokyo model appliance on the tailnet; the
+    # integration branch carries these defaults, upstream requires the variables.
+    LOCAL_BASE_URL="${FRESHEYES_LOCAL_BASE_URL:-http://azbd3:8080/v1}"
+    MODEL="${FRESHEYES_LOCAL_MODEL:-/Users/joi/models/GLM-5.3-Flash-MLX-mixed-4_8bit}"
     if [[ -z "$LOCAL_BASE_URL" || -z "$MODEL" ]]; then
       echo "Error: --local needs FRESHEYES_LOCAL_BASE_URL (the server's /v1 base URL) and FRESHEYES_LOCAL_MODEL (its model id)." >&2
       exit 1
     fi
-    LOCAL_PROVIDER_ID="${FRESHEYES_LOCAL_PROVIDER_ID:-local}"
+    LOCAL_PROVIDER_ID="${FRESHEYES_LOCAL_PROVIDER_ID:-azbd3}"
     # Both are spliced into TOML on the codex command line: the id as a bare
     # table key, the URL inside a quoted string.
     if [[ ! "$LOCAL_PROVIDER_ID" =~ ^[A-Za-z0-9_-]+$ ]]; then

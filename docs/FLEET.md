@@ -31,6 +31,11 @@ section), and `fix/branch-scope-origin-main`, which changes the
 branch-review scope example in `SKILL.md` from `main...HEAD` to
 `origin/main...HEAD`.
 
+`fleet-2026.11.09` adds `fix/local-codex-provider` (kata jibot-code#c3r7):
+`--local`, a Codex review against an OpenAI-compatible server of one's own,
+with the provider passed on the `codex exec` line. On this branch the
+provider defaults to azbd3's GLM-5.3-Flash (see the next section).
+
 This file exists only on the integration branch. It is not offered upstream.
 
 ## Branches
@@ -111,6 +116,25 @@ check catches a miss, and so does
 `test_fable_5_1_default_rejects_old_claude_code` in
 `tests/fresheyes-claude-provider-test.sh`. That test runs the default on Claude
 Code 2.1.256 and expects the Fable 5.1 gate's error.
+
+The `--local` defaults are the third piece of fleet policy on this branch
+(kata jibot-code#c3r7, the first consumer of azbd3, jibot-code#ea1r). Upstream's
+`fix/local-codex-provider` requires `FRESHEYES_LOCAL_BASE_URL` and
+`FRESHEYES_LOCAL_MODEL` and refuses without them; the integration branch
+defaults them to `http://azbd3:8080/v1` and
+`/Users/joi/models/GLM-5.3-Flash-MLX-mixed-4_8bit`, with provider id `azbd3`,
+so `fresheyes.sh --local` works on every fleet Mac on the tailnet with nothing
+set. The three lines live in the merge's follow-up commit, not on a branch, and
+the fleet case in `tests/fresheyes-gpt-provider-test.sh` replaces upstream's
+missing-variable case (which cannot be expressed once defaults exist). The
+local reviewer may read private repos: azbd3 is a trusted machine on the
+tailnet and no request leaves it (cell-fleet `ops/baton/ROUTING.md` Gate 1 bars
+the z.ai and Moonshot lanes from private material; this one is exempt because
+it is not a third party). It is slower than Sol (tens of tokens per second,
+prefill in the hundreds), so a branch review takes minutes to tens of minutes.
+`routing.toml` does not yet carry these two values; add a `[review]` field and
+teach `routing-project` the third line before the next upstream merge, or
+check them by hand.
 
 Since `fleet-2026.09.22` a review result is bound to the run that produced it
 (`fix/result-handle-binding`, upstream pull request 25, merged 2026-09-22, kata
