@@ -38,6 +38,8 @@ The Claude reviewer runs read-only: it can read files and run `git diff`, `git s
 
 Note that Claude reviews count against your Claude overage, not your subscription _(shakes fist at universe)_.
 
+`--local` runs the review through Codex CLI against an OpenAI-compatible server you run yourself (vLLM, llama.cpp, mlx and the like), so private material never leaves your machines. Set `FRESHEYES_LOCAL_BASE_URL` to the server's `/v1` base URL and `FRESHEYES_LOCAL_MODEL` to the model id it serves; `FRESHEYES_LOCAL_PROVIDER_ID` (default `local`) names the Codex provider. The provider is passed on the `codex exec` line, so nothing is added to `config.toml` and it works under `FRESHEYES_CODEX_IGNORE_USER_CONFIG=1`. The server must implement the Responses API (`/v1/responses`): Codex CLI 0.159 no longer speaks the chat-completions wire format. Reasoning effort is passed as for GPT; a server that does not support it ignores it.
+
 ## How to do it:
 
 Fresh Eyes reviews what Git can show it. So:

@@ -518,4 +518,67 @@ if ! grep -q '^INDEPENDENT CODE REVIEW PASSED$' "$STDIN_STDOUT_FILE"; then
   exit 1
 fi
 
+
+# --local: the provider travels on the codex exec line as -c overrides, with the
+# model from FRESHEYES_LOCAL_MODEL, and both variables are required.
+rm -f "$ARGV_FILE"
+PATH="$FAKE_BIN:$PATH" \
+  FRESHEYES_FAKE_ARGV="$ARGV_FILE" \
+  FRESHEYES_LOG_DIR="$TEST_TMP/logs" \
+  FRESHEYES_GLOBAL_LOG_DIR="$TEST_TMP/global-logs" \
+  FRESHEYES_FAKE_VERSION_PROBE="$VERSION_PROBE_FILE" \
+  FRESHEYES_GPT_MODEL=gpt-6-astra \
+  FRESHEYES_MODEL=gpt-6-astra \
+  FRESHEYES_REASONING= \
+  FRESHEYES_LOCAL_BASE_URL="http://models.example:8080/v1" \
+  FRESHEYES_LOCAL_MODEL="/srv/models/example-model" \
+  FRESHEYES_LOCAL_PROVIDER_ID=examplebox \
+  FRESHEYES_MODE=manual \
+  timeout 30s bash "$RUNNER" --foreground --local "Review README.md." > "$STDOUT_FILE"
+
+python3 - "$ARGV_FILE" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    argv = json.load(handle)
+
+model_index = argv.index("--model")
+if argv[model_index + 1] != "/srv/models/example-model":
+    raise SystemExit(f"--local must send FRESHEYES_LOCAL_MODEL, not a GPT pin: {argv!r}")
+for expected in (
+    'model_providers.examplebox.base_url="http://models.example:8080/v1"',
+    'model_providers.examplebox.wire_api="responses"',
+    "model_provider=examplebox",
+):
+    if expected not in argv:
+        raise SystemExit(f"--local did not pass {expected!r} on the codex exec line: {argv!r}")
+if "model_reasoning_effort=xhigh" not in argv:
+    raise SystemExit(f"--local manual review did not keep the manual reasoning level: {argv!r}")
+PY
+
+if ! grep -q '^INDEPENDENT CODE REVIEW PASSED$' "$STDOUT_FILE"; then
+  printf -- '--local manual review did not return the passing review:\n' >&2
+  cat "$STDOUT_FILE" >&2
+  exit 1
+fi
+
+set +e
+PATH="$FAKE_BIN:$PATH" \
+  FRESHEYES_FAKE_ARGV="$ARGV_FILE" \
+  FRESHEYES_LOG_DIR="$TEST_TMP/logs" \
+  FRESHEYES_GLOBAL_LOG_DIR="$TEST_TMP/global-logs" \
+  FRESHEYES_FAKE_VERSION_PROBE="$VERSION_PROBE_FILE" \
+  FRESHEYES_LOCAL_BASE_URL= \
+  FRESHEYES_LOCAL_MODEL="/srv/models/example-model" \
+  FRESHEYES_MODE=manual \
+  timeout 30s bash "$RUNNER" --foreground --provider local "Review README.md." > "$STDOUT_FILE" 2> "$TEST_TMP/local-missing.txt"
+status=$?
+set -e
+if [[ "$status" -ne 1 ]] || ! grep -q 'FRESHEYES_LOCAL_BASE_URL' "$TEST_TMP/local-missing.txt"; then
+  printf -- '--local without FRESHEYES_LOCAL_BASE_URL must fail with a named error (status %s):\n' "$status" >&2
+  cat "$TEST_TMP/local-missing.txt" >&2
+  exit 1
+fi
+
 printf 'fresheyes-gpt-provider tests passed\n'
