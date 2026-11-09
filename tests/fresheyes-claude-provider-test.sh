@@ -50,8 +50,8 @@ if sys.argv[1:] == ["--version"]:
     probe = os.environ.get("FRESHEYES_FAKE_CLAUDE_VERSION_PROBE")
     if probe:
         with open(probe, "w", encoding="utf-8") as handle:
-            handle.write(os.environ.get("FRESHEYES_FAKE_CLAUDE_VERSION", "2.1.283"))
-    print(f"{os.environ.get('FRESHEYES_FAKE_CLAUDE_VERSION', '2.1.283')} (Claude Code)")
+            handle.write(os.environ.get("FRESHEYES_FAKE_CLAUDE_VERSION", "2.1.321"))
+    print(f"{os.environ.get('FRESHEYES_FAKE_CLAUDE_VERSION', '2.1.321')} (Claude Code)")
     raise SystemExit(0)
 
 argv_file = os.environ["FRESHEYES_FAKE_ARGV"]
@@ -253,8 +253,8 @@ for value in ["--verbose", "--include-partial-messages", "--disable-slash-comman
 if "--bare" in argv:
     raise SystemExit(f"unexpected --bare: {argv!r}")
 model_idx = argv.index("--model")
-if model_idx + 1 >= len(argv) or argv[model_idx + 1] != "claude-fable-5-1":
-    raise SystemExit(f"manual Claude review did not use Fable 5.1: {argv!r}")
+if model_idx + 1 >= len(argv) or argv[model_idx + 1] != "claude-fable-5-2":
+    raise SystemExit(f"manual Claude review did not use Fable 5.2: {argv!r}")
 effort_idx = argv.index("--effort")
 if effort_idx + 1 >= len(argv) or argv[effort_idx + 1] != "xhigh":
     raise SystemExit(f"manual Claude review did not use xhigh effort: {argv!r}")
@@ -284,8 +284,8 @@ for value in [
 if "--bare" in argv:
     raise SystemExit(f"unexpected --bare: {argv!r}")
 model_idx = argv.index("--model")
-if model_idx + 1 >= len(argv) or argv[model_idx + 1] != "claude-fable-5-1":
-    raise SystemExit(f"automatic Claude review did not use Fable 5.1: {argv!r}")
+if model_idx + 1 >= len(argv) or argv[model_idx + 1] != "claude-fable-5-2":
+    raise SystemExit(f"automatic Claude review did not use Fable 5.2: {argv!r}")
 effort_idx = argv.index("--effort")
 if effort_idx + 1 >= len(argv) or argv[effort_idx + 1] != "medium":
     raise SystemExit(f"automatic Claude review did not use medium effort: {argv!r}")
@@ -374,7 +374,7 @@ test_manual_claude_invocation_uses_streaming_flags() {
 
   assert_manual_argv
   assert_restricted_argv
-  [[ -s "$VERSION_PROBE_FILE" ]] || fail "Fable 5.1 review did not verify the Claude Code version"
+  [[ -s "$VERSION_PROBE_FILE" ]] || fail "Fable 5.2 review did not verify the Claude Code version"
   assert_contains "$output" "INDEPENDENT CODE REVIEW PASSED" "manual Claude output"
   assert_contains "$output" "- README.md" "manual Claude output preserves the first files list"
   log_file=$(read_latest_file "$run_tmp" 'fresheyes-*.log')
@@ -655,15 +655,15 @@ if argv[model_idx + 1] != "claude-opus-5-5":
 PY
 }
 
-test_fable_5_1_default_rejects_old_claude_code() {
+test_fable_5_2_default_rejects_old_claude_code() {
   local run_tmp stdout_file stderr_file status
   run_tmp="$(mktemp -d "$TEST_TMP/old-claude-default.XXXXXX")"
   stdout_file="$run_tmp/stdout.txt"
   stderr_file="$run_tmp/stderr.txt"
   rm -f "$ARGV_FILE" "$ARGV_FILE.env"
 
-  # The fork's default is Fable 5.1 (fleet routing), so with no model named
-  # its 2.1.257 gate applies: 2.1.256 is refused by name.
+  # The fork's default is Fable 5.2 (fleet routing, 2026-11-10), so with no
+  # model named its 2.1.319 gate applies: 2.1.318 is refused by name.
   set +e
   TMPDIR="$run_tmp" \
     FRESHEYES_LOG_DIR="$run_tmp/fresheyes-logs" \
@@ -672,7 +672,7 @@ test_fable_5_1_default_rejects_old_claude_code() {
     FRESHEYES_MODEL= \
     FRESHEYES_REASONING= \
     FRESHEYES_CODEX_IGNORE_USER_CONFIG= \
-    FRESHEYES_FAKE_CLAUDE_VERSION="2.1.256" \
+    FRESHEYES_FAKE_CLAUDE_VERSION="2.1.318" \
     FRESHEYES_FAKE_CLAUDE_VERSION_PROBE="$VERSION_PROBE_FILE" \
     PATH="$FAKE_BIN:$PATH" \
     FRESHEYES_FAKE_ARGV="$ARGV_FILE" \
@@ -680,8 +680,8 @@ test_fable_5_1_default_rejects_old_claude_code() {
   status=$?
   set -e
 
-  [[ "$status" -ne 0 ]] || fail "default Claude review accepted unsupported Claude Code 2.1.256"
-  assert_contains "$(cat "$stderr_file")" "Claude Fable 5.1 requires Claude Code 2.1.257 or newer" "old Claude Code failure for the default"
+  [[ "$status" -ne 0 ]] || fail "default Claude review accepted unsupported Claude Code 2.1.318"
+  assert_contains "$(cat "$stderr_file")" "Claude Fable 5.2 requires Claude Code 2.1.319 or newer" "old Claude Code failure for the default"
 }
 
 test_fable_5_1_override_rejects_old_claude_code() {
@@ -907,7 +907,7 @@ test_manual_detaches_by_default_and_completes
 test_manual_foreground_runs_synchronously
 test_automatic_mode_does_not_detach
 test_opus_5_5_rejects_old_claude_code
-test_fable_5_1_default_rejects_old_claude_code
+test_fable_5_2_default_rejects_old_claude_code
 test_fable_5_1_override_rejects_old_claude_code
 test_reasoning_env_sets_claude_effort
 test_opus_5_5_accepts_exact_minimum

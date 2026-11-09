@@ -99,7 +99,7 @@ request and is the one branch outside rule 2. It was cut before
 (12a2ff2, the same change as fd5e85b). Nothing is lost by that on the
 integration branch; do not open a pull request from it as it stands.
 
-The default Claude reviewer is `claude-fable-5-1`, not upstream's
+The default Claude reviewer is `claude-fable-5-2` (Fable 5.2, since 2026-11-10, kata jibot-code#tng5; `claude-fable-5-1` before that), not upstream's
 `claude-opus-5-5` (9997894). Routing ruling jibot-code#g0rk says an Astra-built
 change is reviewed by Fable, and a Codex executor's `/do-it` review sets only
 `FRESHEYES_PROVIDER=claude`, so this default is that reviewer's model. The
@@ -113,9 +113,10 @@ own: it lives only on the integration branch, set in the merge ece38e8, and is
 the second exception to rule 2. The next merge of upstream must check both
 default lines against `routing.toml` and set either back by hand. The routing
 check catches a miss, and so does
-`test_fable_5_1_default_rejects_old_claude_code` in
+`test_fable_5_2_default_rejects_old_claude_code` in
 `tests/fresheyes-claude-provider-test.sh`. That test runs the default on Claude
-Code 2.1.256 and expects the Fable 5.1 gate's error.
+Code 2.1.318 and expects the Fable 5.2 gate's error (2.1.319, the oldest
+version that ran the id on a pool seat).
 
 The `--local` defaults are the third piece of fleet policy on this branch
 (kata jibot-code#c3r7, the first consumer of azbd3, jibot-code#ea1r). Upstream's

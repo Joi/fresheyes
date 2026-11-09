@@ -83,7 +83,7 @@ make_fake_claude() {
 # fresheyes-detach-test-marker
 import json, os, re, sys, time
 if "--version" in sys.argv:
-    print(os.environ.get("FRESHEYES_FAKE_CLAUDE_VERSION", "2.1.283 (Claude Code)"))
+    print(os.environ.get("FRESHEYES_FAKE_CLAUDE_VERSION", "2.1.321 (Claude Code)"))
     sys.exit(0)
 argv_path = os.environ.get("FRESHEYES_FAKE_ARGV")
 if argv_path:

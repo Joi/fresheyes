@@ -112,7 +112,7 @@ case "$PROVIDER" in
     PROVIDER_LABEL="Codex"
     ;;
   claude)
-    MODEL="${FRESHEYES_CLAUDE_MODEL:-${FRESHEYES_MODEL:-claude-fable-5-1}}"
+    MODEL="${FRESHEYES_CLAUDE_MODEL:-${FRESHEYES_MODEL:-claude-fable-5-2}}"
     PROVIDER_LABEL="Claude"
     ;;
   local)
@@ -326,6 +326,7 @@ elif [[ "$PROVIDER" == "claude" ]]; then
     CLAUDE_MODEL_FAMILY=""
     case "$MODEL" in
       claude-opus-5-5*)  MINIMUM_CLAUDE_VERSION="2.1.280"; CLAUDE_MODEL_FAMILY="Claude Opus 5.5" ;;
+      claude-fable-5-2*) MINIMUM_CLAUDE_VERSION="2.1.319"; CLAUDE_MODEL_FAMILY="Claude Fable 5.2" ;;
       claude-fable-5-1*) MINIMUM_CLAUDE_VERSION="2.1.257"; CLAUDE_MODEL_FAMILY="Claude Fable 5.1" ;;
       claude-fable-5*)   MINIMUM_CLAUDE_VERSION="2.1.170"; CLAUDE_MODEL_FAMILY="Claude Fable 5" ;;
     esac
